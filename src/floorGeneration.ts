@@ -11,15 +11,15 @@ import {
   SLOT_MACHINE_SIZE,
   POTION_PICKUP_SIZE,
   CHEST_SIZE,
+  SPECIAL_PICKUP_SIZE,
   ALL_MOB_TYPES,
+  ALL_WEAPON_IDS,
+  LEGENDARY_WEAPON_IDS,
 } from "./constants";
 import { createRng } from "./rng";
 import { findLayoutPosition, findOpenPosition, isSnakeSpawnClear } from "./placement";
 import {
   clearDoorCorridors,
-  DOOR_LENGTH,
-  DOOR_START_X,
-  DOOR_START_Y,
   getDoorClearZones,
   layoutToObstacles,
   pickRoomLayout,
@@ -57,9 +57,9 @@ function generateMob(type: MobType, depth: number, rng: () => number): MobConfig
       return {
         type,
         segments: [{ x: 0, y: 0 }],
-        size: 56,
-        speed: 1.1 + depth * 0.04,
-        maxHp: Math.floor(40 + depth * 6),
+        size: 96,
+        speed: 0.95 + depth * 0.025,
+        maxHp: Math.floor(55 + depth * 8),
         contactDamage: Math.floor(baseContact * 1.5),
       };
     case "snake": {
@@ -123,12 +123,23 @@ function generateEnemies(depth: number, rng: () => number, isStartRoom: boolean)
 function generateChestLoot(depth: number, rng: () => number): ChestLoot {
   const roll = rng();
 
-  if (roll < 0.35) {
-    const weaponIds = ["iron-sword", "war-axe", "dagger"] as const;
-    return { kind: "weapon", weaponId: weaponIds[Math.floor(rng() * weaponIds.length)] };
+  if (roll < 0.5) {
+    const normalPool = ALL_WEAPON_IDS.filter((id) => !LEGENDARY_WEAPON_IDS.includes(id));
+    return { kind: "weapon", weaponId: normalPool[Math.floor(rng() * normalPool.length)] };
   }
 
-  if (roll < 0.7) {
+  if (roll < 0.58 && depth >= 4) {
+    return {
+      kind: "weapon",
+      weaponId: LEGENDARY_WEAPON_IDS[Math.floor(rng() * LEGENDARY_WEAPON_IDS.length)],
+    };
+  }
+
+  if (roll < 0.66 && depth >= 2) {
+    return { kind: "special", specialId: "dash-boots" };
+  }
+
+  if (roll < 0.78) {
     return { kind: "health-potion", healAmount: 30 + Math.floor(depth * 10 + rng() * 10) };
   }
 
@@ -150,15 +161,15 @@ function rollRoomLoot(rng: () => number) {
 }
 
 function backgroundForDepth(depth: number, variant: number) {
-  const palettes = [
-    "#1a1428",
-    "#141c24",
-    "#1c1410",
-    "#10181c",
-    "#18141c",
+  const tints = [
+    "rgba(52, 32, 22, 0.42)",
+    "rgba(44, 24, 18, 0.45)",
+    "rgba(58, 28, 24, 0.4)",
+    "rgba(36, 22, 28, 0.44)",
+    "rgba(48, 30, 18, 0.43)",
   ];
 
-  return palettes[(depth + variant) % palettes.length];
+  return tints[(depth + variant) % tints.length];
 }
 
 function placeVoidShardAndSlotMachine(
@@ -166,7 +177,6 @@ function placeVoidShardAndSlotMachine(
   startId: string,
   depth: number,
   rng: () => number,
-  coinSize: number,
   buildOccupied: (room: Room) => { x: number; y: number; w: number; h: number }[],
 ) {
   if (depth % VOID_SHARD_FLOOR_INTERVAL !== 0) {
@@ -200,6 +210,22 @@ function placeVoidShardAndSlotMachine(
 
   startRoom.slotMachine = machinePos;
   startRoom.name = `Depth ${depth} · Shrine Floor`;
+
+  const chestPos = findOpenPosition(
+    rng,
+    CHEST_SIZE,
+    buildOccupied(startRoom),
+    startRoom.exits,
+    startRoom.obstacles,
+  );
+
+  startRoom.chest = {
+    x: chestPos.x,
+    y: chestPos.y,
+    opened: false,
+    variant: "slot",
+    loot: { kind: "health-potion", healAmount: 25 + depth * 5 },
+  };
 }
 
 function placeShop(
@@ -212,6 +238,10 @@ function placeShop(
     return;
   }
 
+  room.enemies = [];
+  room.isCraftingRoom = true;
+  room.name = `Depth ${depth} · Merchant's Rest`;
+
   const shopPos = findOpenPosition(
     rng,
     SHOP_STATION_SIZE,
@@ -221,7 +251,20 @@ function placeShop(
   );
 
   room.shop = shopPos;
-  room.name = `Depth ${depth} · Merchant's Rest`;
+
+  const specialPos = findOpenPosition(
+    rng,
+    SPECIAL_PICKUP_SIZE,
+    [
+      ...buildOccupied(room),
+      { x: shopPos.x, y: shopPos.y, w: SHOP_STATION_SIZE, h: SHOP_STATION_SIZE },
+    ],
+    room.exits,
+    room.obstacles,
+  );
+
+  room.specialPickup = { x: specialPos.x, y: specialPos.y, specialId: "dash-boots" };
+  room.specialPickupCollected = false;
 }
 
 function spawnEnemyInRoom(
@@ -393,7 +436,7 @@ function generateBossFloor(depth: number, seed: number, coinSize: number): Floor
 
   prepBuilt.room.name = `Depth ${depth} · Boss Antechamber`;
   prepBuilt.room.isPrepRoom = true;
-  bossBuilt.room.name = `Depth ${depth} · Boss Chamber`;
+  bossBuilt.room.name = `Depth ${depth} · Mecha Stone Golem`;
   bossBuilt.room.isBossRoom = true;
 
   placeShop(prepBuilt.room, depth, rng, (room) => {
@@ -518,7 +561,7 @@ export function generateFloor(depth: number, seed: number, coinSize: number): Fl
     return occ;
   };
 
-  placeVoidShardAndSlotMachine(rooms, startId, depth, rng, coinSize, buildOccupied);
+  placeVoidShardAndSlotMachine(rooms, startId, depth, rng, buildOccupied);
   placeShop(rooms[startId], depth, rng, buildOccupied);
 
   return {

@@ -12,6 +12,7 @@ import slotMachineUrl from "./assets/sprites/dungeon-pack/items and trap_animati
 import voidShardUrl from "./assets/sprites/dungeon-pack/items and trap_animation/keys/keys_2_1.png";
 import skeletonIdleUrl from "./assets/sprites/dungeon-pack/Character_animation/monsters_idle/skeleton1/v1/skeleton_v1_1.png";
 import vampireIdleUrl from "./assets/sprites/dungeon-pack/Character_animation/monsters_idle/vampire/v1/vampire_v1_1.png";
+import dashBootsUrl from "./assets/sprites/dungeon-pack/items and trap_animation/mini_box_2/mini_box_2_1.png";
 import heroIdleDownUrl from "./assets/sprites/rpg-hero/idle/idle_down_40x40.png";
 import heroIdleUpUrl from "./assets/sprites/rpg-hero/idle/idle_up_40x40.png";
 import heroIdleLeftUrl from "./assets/sprites/rpg-hero/idle/idle_left_40x40.png";
@@ -21,7 +22,7 @@ export const TILE_SIZE = 16;
 export const TILE_DRAW_SIZE = 32;
 export const TILE_SCALE = TILE_DRAW_SIZE / TILE_SIZE;
 const HERO_FRAME = 40;
-export const HERO_DRAW_SIZE = 52;
+export const HERO_DRAW_SIZE = 64;
 
 /**
  * Pixel Poem dungeon tileset (10×10 grid of 16px tiles).
@@ -225,6 +226,7 @@ export async function loadAssetSprites() {
     voidShard,
     skeletonMob,
     vampireMob,
+    dashBoots,
     heroDown,
     heroUp,
     heroLeft,
@@ -242,6 +244,7 @@ export async function loadAssetSprites() {
     loadImage(voidShardUrl),
     loadImage(skeletonIdleUrl),
     loadImage(vampireIdleUrl),
+    loadImage(dashBootsUrl),
     loadImage(heroIdleDownUrl),
     loadImage(heroIdleUpUrl),
     loadImage(heroIdleLeftUrl),
@@ -286,6 +289,7 @@ export async function loadAssetSprites() {
       coin: imageToCanvas(coin),
       voidShard: imageToCanvas(voidShard),
       slotMachine: imageToCanvas(slotMachine),
+      dashBoots: imageToCanvas(dashBoots),
       snakeHead: sliceCharacter(characters, ...MOB_TILES.snakeHead),
       snakeBody: sliceCharacter(characters, ...MOB_TILES.snakeBody),
       slime: sliceCharacter(characters, ...MOB_TILES.slime),

@@ -495,3 +495,40 @@ canvas {
   color: #ffb84d;
   font-weight: bold;
 }
+
+.leaderboard-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  max-height: 320px;
+  overflow-y: auto;
+  margin: 0 0 1rem;
+  text-align: left;
+}
+
+.leaderboard-row {
+  display: grid;
+  grid-template-columns: 2rem 1fr 1fr;
+  gap: 0.25rem 0.75rem;
+  padding: 0.55rem 0.65rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  color: #d8d0c8;
+}
+
+.leaderboard-rank {
+  color: #ffb84d;
+  font-weight: bold;
+}
+
+.leaderboard-score {
+  color: #fff;
+  font-weight: bold;
+}
+
+.leaderboard-empty {
+  color: #a89890;
+  margin: 0 0 1rem;
+}

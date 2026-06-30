@@ -742,6 +742,7 @@ export const SPRITES: SpriteSheet = {
   coin: coinSprite,
   voidShard: voidShardSprite,
   slotMachine: slotMachineSprite,
+  dashBoots: slotMachineSprite,
   snakeHead,
   snakeBody,
   slime: slimeSprite,

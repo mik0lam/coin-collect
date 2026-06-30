@@ -1,6 +1,6 @@
 import { boxesOverlap } from "./collision";
-import { SHOP_ITEMS, SHOP_STATION_SIZE, WEAPONS } from "./constants";
-import type { Box, InventoryItem, Room } from "./types";
+import { SHOP_ITEMS, SHOP_STATION_SIZE, SPECIAL_ITEMS, WEAPONS } from "./constants";
+import type { Box, InventoryItem, Room, SpecialItemId } from "./types";
 import { getWeaponDurability } from "./inventory";
 
 export function tryBuyHealthPotion(score: { value: number }): string | null {
@@ -53,6 +53,25 @@ export function tryBuyWeaponRepair(
   activeItem.weaponDurability = def.maxDurability;
 
   return `Repaired ${def.name}.`;
+}
+
+export function tryBuySpecialItem(
+  score: { value: number },
+  specialId: SpecialItemId,
+  alreadyOwned: boolean,
+): string | null {
+  const item = SPECIAL_ITEMS[specialId];
+
+  if (alreadyOwned) {
+    return "You already have dash.";
+  }
+
+  if (score.value < item.shopCost) {
+    return `Need ${item.shopCost} coins.`;
+  }
+
+  score.value -= item.shopCost;
+  return `bought-special:${specialId}`;
 }
 
 export function isNearShopStation(room: Room, playerBox: Box) {

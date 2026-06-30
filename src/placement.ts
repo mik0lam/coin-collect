@@ -1,5 +1,5 @@
 import { randomPosition } from "./rng";
-import { boxesOverlap, isSpawnBoxClear } from "./collision";
+import { isSpawnBoxClear } from "./collision";
 import { PLAY_HEIGHT, PLAY_WIDTH } from "./constants";
 import type { Box, Direction } from "./types";
 import type { LayoutObstacle, RoomLayoutTemplate } from "./roomLayouts";

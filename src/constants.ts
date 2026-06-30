@@ -1,4 +1,4 @@
-import type { ArmorTier, MobType, WeaponDef, WeaponId } from "./types";
+import type { ArmorTier, MobType, SpecialItemId, WeaponDef, WeaponId } from "./types";
 
 export const PLAY_WIDTH = 800;
 export const PLAY_HEIGHT = 416;
@@ -69,6 +69,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     swingArcScale: 1.15,
     swingSpriteSize: 48,
     rarity: "legendary",
+    ability: "Life Steal — heal 2 HP on kill",
   },
   "storm-cleaver": {
     damage: 4,
@@ -83,6 +84,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     swingArcScale: 1.35,
     swingSpriteSize: 50,
     rarity: "legendary",
+    ability: "Chain Bolt — 40% chance to hit a second foe",
   },
   "blood-reaper": {
     damage: 7,
@@ -97,6 +99,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     swingArcScale: 1.3,
     swingSpriteSize: 52,
     rarity: "legendary",
+    ability: "Execution — double damage below 30% HP",
   },
   "phantom-blade": {
     damage: 3,
@@ -111,6 +114,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     swingArcScale: 0.8,
     swingSpriteSize: 34,
     rarity: "legendary",
+    ability: "Phase Strike — attacks never lose durability",
   },
 };
 
@@ -148,9 +152,33 @@ export const VOID_SHARD_SIZE = 34;
 export const SLOT_MACHINE_SIZE = 64;
 export const SLOT_SPIN_MS = 2600;
 export const MAX_INVENTORY_SIZE = 6;
+export const INVENTORY_ABSOLUTE_MAX = 9;
+export const BOSS_INVENTORY_BONUS = 1;
 export const SCRAP_PICKUP_SIZE = 28;
 export const SHOP_STATION_SIZE = 56;
 export const BOSS_HEART_SIZE = 36;
+export const SPECIAL_PICKUP_SIZE = 40;
+
+export const DASH_COOLDOWN_MS = 900;
+export const DASH_DURATION_MS = 140;
+export const DASH_SPEED = 16;
+
+export const SPECIAL_ITEMS: Record<SpecialItemId, { name: string; description: string; shopCost: number }> = {
+  "dash-boots": {
+    name: "Dash Boots",
+    description: "Press Shift to dash through danger",
+    shopCost: 45,
+  },
+};
+
+export const ARMOR_VISUAL: Record<
+  Exclude<ArmorTier, "none">,
+  { tint: string; alpha: number; accent: string }
+> = {
+  leather: { tint: "#8B5A2B", alpha: 0.28, accent: "#6B4423" },
+  chain: { tint: "#8899AA", alpha: 0.32, accent: "#667788" },
+  plate: { tint: "#C0C8D8", alpha: 0.38, accent: "#909AAA" },
+};
 
 export const ARMOR_TIERS: Record<
   Exclude<ArmorTier, "none">,

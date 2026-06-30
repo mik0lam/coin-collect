@@ -12,7 +12,8 @@ export type WeaponId =
   | "storm-cleaver"
   | "blood-reaper"
   | "phantom-blade";
-export type InventoryItemType = "health-potion" | "strong-potion" | "weapon";
+export type InventoryItemType = "health-potion" | "strong-potion" | "weapon" | "special";
+export type SpecialItemId = "dash-boots";
 export type ArmorTier = "none" | "leather" | "chain" | "plate";
 
 export interface WeaponDef {
@@ -28,6 +29,7 @@ export interface WeaponDef {
   swingArcScale: number;
   swingSpriteSize: number;
   rarity?: "normal" | "legendary";
+  ability?: string;
 }
 
 export interface MobConfig {
@@ -40,6 +42,20 @@ export interface MobConfig {
   currentHp?: number;
 }
 
+export type GolemBossPhase = "idle" | "chase" | "laser" | "throw" | "hurt" | "dying";
+
+export interface GolemBossState {
+  phase: GolemBossPhase;
+  anim: "idle" | "walk" | "laser" | "hurt" | "throw" | "death";
+  animStartedAt: number;
+  facingRight: boolean;
+  nextAttackAt: number;
+  phaseStartedAt: number;
+  attackTriggered: boolean;
+  deathHandled: boolean;
+  hurtUntil: number;
+}
+
 export interface RuntimeMob {
   configIndex: number;
   type: MobType;
@@ -50,12 +66,14 @@ export interface RuntimeMob {
   maxHp: number;
   contactDamage: number;
   hitFlashUntil: number;
+  golemState?: GolemBossState;
 }
 
 export type ChestLoot =
   | { kind: "weapon"; weaponId: WeaponId }
   | { kind: "health-potion"; healAmount: number }
-  | { kind: "strong-potion"; healAmount: number };
+  | { kind: "strong-potion"; healAmount: number }
+  | { kind: "special"; specialId: SpecialItemId };
 
 export interface Chest {
   x: number;
@@ -70,6 +88,7 @@ export interface InventoryItem {
   healAmount?: number;
   weaponId?: WeaponId;
   weaponDurability?: number;
+  specialId?: SpecialItemId;
 }
 
 export interface ScrapPickup {
@@ -107,9 +126,13 @@ export interface Room {
   shop?: ShopStation;
   scrapPickups?: ScrapPickup[];
   bossHeartPickup?: { x: number; y: number };
+  bossWeaponPickup?: { x: number; y: number; weaponId: WeaponId };
   bossDefeated?: boolean;
   isPrepRoom?: boolean;
   isBossRoom?: boolean;
+  isCraftingRoom?: boolean;
+  specialPickup?: { x: number; y: number; specialId: SpecialItemId };
+  specialPickupCollected?: boolean;
   layoutId?: string;
 }
 

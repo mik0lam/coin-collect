@@ -1,29 +1,42 @@
 import "./style.css";
 import { SPRITES, drawSprite, drawSpriteCentered, drawTintedSprite, getWeaponSprite, FLOOR_TILES } from "./sprites";
 import { loadAssetSprites, HERO_DRAW_SIZE, TILE_DRAW_SIZE, TILE_SCALE } from "./spriteAssets";
+import { loadGolemSprites, areGolemSpritesLoaded } from "./golemSprites";
 import {
-  clearDoorCorridors,
+  clearGolemEffects,
+  createGolemBossState,
+  drawGolemBoss,
+  drawGolemEffects,
+  isGolemBossContactActive,
+  isGolemDeathComplete,
+  startGolemDeath,
+  triggerGolemHurt,
+  updateGolemBoss,
+} from "./golemBoss";
+import {
   DOOR_LENGTH,
   DOOR_START_X,
   DOOR_START_Y,
-  getDoorClearZones,
-  layoutToObstacles,
-  obstacleHitbox,
-  pickRoomLayout,
-  ROOM_LAYOUTS,
   type LayoutObstacle,
 } from "./roomLayouts";
 import { drawTileDebugOverlay, inspectTileAt, type TileInspection } from "./tileDebug";
 import {
   ARMOR_TIERS,
+  ARMOR_VISUAL,
   BASE_MAX_HP,
   BOSS_HEART_HP_BONUS,
   BOSS_HEART_SIZE,
   CHEST_SIZE,
+  DASH_COOLDOWN_MS,
+  DASH_DURATION_MS,
+  DASH_SPEED,
   DESCEND_BONUS,
   FLOOR_MESSAGE_MS,
   LEGENDARY_WEAPON_IDS,
   MAX_INVENTORY_SIZE,
+  INVENTORY_ABSOLUTE_MAX,
+  BOSS_INVENTORY_BONUS,
+  ALL_WEAPON_IDS,
   MOB_COLORS,
   PLAY_HEIGHT,
   PLAY_WIDTH,
@@ -31,21 +44,21 @@ import {
   SCRAP_PICKUP_SIZE,
   SHOP_ITEMS,
   SHOP_STATION_SIZE,
+  SPECIAL_ITEMS,
+  SPECIAL_PICKUP_SIZE,
   SLOT_MACHINE_SIZE,
   SLOT_SPIN_MS,
   STAIRS_COOLDOWN_MS,
-  SWORD_START_POSITION,
   VOID_SHARD_SIZE,
   WEAPON_PICKUP_SIZE,
   WEAPONS,
 } from "./constants";
-import { boxesOverlap, collidesWithPerimeterWalls, collidesWithRoomObstacles } from "./collision";
+import { boxesOverlap, collidesWithRoomObstacles } from "./collision";
 import { generateFloor } from "./floorGeneration";
-import { findLayoutPosition, findOpenPosition } from "./placement";
-import { canCraftNextArmor, getArmorLabel, getNextArmorTier, tryCraftArmor } from "./crafting";
+import { hashRoomSeed } from "./rng";
+import { getArmorLabel, getNextArmorTier, tryCraftArmor } from "./crafting";
 import {
   getDiscoveredWeapons,
-  getUndiscoveredWeaponCount,
   isWeaponDiscovered,
   recordWeaponDiscovered,
   resetWeaponEncyclopedia,
@@ -55,7 +68,22 @@ import {
   tryBuyHealthPotion,
   tryBuyStrongPotion,
   tryBuyWeaponRepair,
+  tryBuySpecialItem,
 } from "./shop";
+import {
+  formatBestWeapon,
+  formatDuration,
+  loadLeaderboard,
+  saveRunToLeaderboard,
+} from "./leaderboard";
+import { createRunStats, getBestWeapon, recordMobKill, type RunStats } from "./runStats";
+import {
+  getEffectiveDamage,
+  getLifeStealOnKill,
+  getWeaponAbilityDescription,
+  shouldChainStrike,
+  shouldSkipDurabilityLoss,
+} from "./weaponAbilities";
 import type {
   ArmorTier,
   ChestLoot,
@@ -63,10 +91,9 @@ import type {
   Floor,
   GameState,
   InventoryItem,
-  MobConfig,
-  MobType,
   Room,
   RuntimeMob,
+  SpecialItemId,
   WeaponDef,
   WeaponId,
 } from "./types";
@@ -103,7 +130,13 @@ app.innerHTML = `
       <div class="menu-actions">
         <button id="play-btn" class="menu-btn menu-btn-primary" type="button">Enter the Cavern</button>
         <button id="help-btn" class="menu-btn menu-btn-secondary" type="button">Controls</button>
+        <button id="leaderboard-btn" class="menu-btn menu-btn-secondary" type="button">Leaderboard</button>
       </div>
+    </div>
+    <div id="menu-leaderboard" class="menu-help hidden">
+      <h2 class="menu-help-title">Past Runs</h2>
+      <div id="leaderboard-list" class="leaderboard-list"></div>
+      <button id="leaderboard-close-btn" class="menu-btn menu-btn-secondary" type="button">Back</button>
     </div>
     <div id="menu-help" class="menu-help hidden">
       <h2 class="menu-help-title">Controls</h2>
@@ -114,6 +147,8 @@ app.innerHTML = `
         <div><dt>Inventory</dt><dd><kbd>I</kbd> · drag items to rearrange</dd></div>
         <div><dt>Potions</dt><dd><kbd>1</kbd> health · <kbd>2</kbd> strong</dd></div>
         <div><dt>Weapons</dt><dd><kbd>3</kbd>–<kbd>8</kbd> select active slot</dd></div>
+        <div><dt>Encyclopedia</dt><dd><kbd>K</kbd> · scroll with mouse wheel</dd></div>
+        <div><dt>Debug</dt><dd><kbd>F3</kbd> tiles · <kbd>F4</kbd> cheat menu</dd></div>
       </dl>
       <button id="help-close-btn" class="menu-btn menu-btn-secondary" type="button">Back</button>
     </div>
@@ -154,7 +189,7 @@ app.innerHTML = `
       </div>
     </header>
     <canvas id="game" width="800" height="416"></canvas>
-    <p class="game-hint">WASD move · Space attack · E interact · 1/2 potions · 3–8 weapons · M map · I inv · K encyclopedia · F3 debug</p>
+    <p class="game-hint">WASD move · Space attack · E interact · M map · I inv · K encyclopedia · F3 tiles · F4 debug</p>
   </div>
   <div id="game-over" class="menu menu-game-over hidden">
     <div class="menu-scene" aria-hidden="true">
@@ -174,6 +209,14 @@ app.innerHTML = `
 
 const menuEl = required(document.querySelector<HTMLDivElement>("#menu"), "Menu");
 const menuHelpEl = required(document.querySelector<HTMLDivElement>("#menu-help"), "Menu help");
+const menuLeaderboardEl = required(
+  document.querySelector<HTMLDivElement>("#menu-leaderboard"),
+  "Menu leaderboard",
+);
+const leaderboardListEl = required(
+  document.querySelector<HTMLDivElement>("#leaderboard-list"),
+  "Leaderboard list",
+);
 const playBtn = required(
   document.querySelector<HTMLButtonElement>("#play-btn"),
   "Play button",
@@ -182,6 +225,14 @@ const helpBtn = required(document.querySelector<HTMLButtonElement>("#help-btn"),
 const helpCloseBtn = required(
   document.querySelector<HTMLButtonElement>("#help-close-btn"),
   "Help close button",
+);
+const leaderboardBtn = required(
+  document.querySelector<HTMLButtonElement>("#leaderboard-btn"),
+  "Leaderboard button",
+);
+const leaderboardCloseBtn = required(
+  document.querySelector<HTMLButtonElement>("#leaderboard-close-btn"),
+  "Leaderboard close button",
 );
 const canvas = required(document.querySelector<HTMLCanvasElement>("#game"), "Canvas");
 const ctx = required(canvas.getContext("2d"), "Canvas context");
@@ -215,236 +266,44 @@ const hudWeaponNameEl = required(
 );
 const hudDurFillEl = required(document.querySelector<HTMLElement>("#hud-dur-fill"), "HUD durability fill");
 
-type GameState = "menu" | "playing" | "gameover";
-type Direction = "north" | "south" | "east" | "west";
-type MobType = "snake" | "slime" | "wraith" | "brute";
-type WeaponId =
-  | "rusty-sword"
-  | "iron-sword"
-  | "war-axe"
-  | "dagger"
-  | "soulreaver"
-  | "storm-cleaver"
-  | "blood-reaper"
-  | "phantom-blade";
-type InventoryItemType = "health-potion" | "strong-potion" | "weapon";
+const DOOR_HIT_DEPTH = TILE_DRAW_SIZE;
 
-interface WeaponDef {
-  damage: number;
-  knockback: number;
-  range: number;
-  width: number;
-  cooldownMs: number;
-  durationMs: number;
-  maxDurability: number;
-  name: string;
-  swingColor: string;
-  swingArcScale: number;
-  swingSpriteSize: number;
-  rarity?: "normal" | "legendary";
-}
+const INVENTORY_UI = {
+  panelX: 120,
+  panelY: 48,
+  panelWidth: 560,
+  panelHeight: 340,
+  slotSize: 72,
+  slotGap: 12,
+  gridX: 148,
+  gridY: 136,
+  cols: 3,
+};
 
-interface MobConfig {
-  type: MobType;
-  segments: { x: number; y: number }[];
-  size: number;
-  speed: number;
-  maxHp: number;
-  contactDamage: number;
-  currentHp?: number;
-}
-
-interface RuntimeMob {
-  configIndex: number;
-  type: MobType;
-  segments: { x: number; y: number }[];
-  size: number;
-  speed: number;
-  hp: number;
-  maxHp: number;
-  contactDamage: number;
-  hitFlashUntil: number;
-}
-
-type ChestLoot =
+type DebugGrantEntry =
   | { kind: "weapon"; weaponId: WeaponId }
   | { kind: "health-potion"; healAmount: number }
-  | { kind: "strong-potion"; healAmount: number };
+  | { kind: "strong-potion"; healAmount: number }
+  | { kind: "special"; specialId: SpecialItemId };
 
-interface Chest {
-  x: number;
-  y: number;
-  opened: boolean;
-  loot: ChestLoot;
-}
-
-interface InventoryItem {
-  type: InventoryItemType;
-  healAmount?: number;
-  weaponId?: WeaponId;
-  weaponDurability?: number;
-}
-
-interface Room {
-  id: string;
-  name: string;
-  background: string;
-  gridX: number;
-  gridY: number;
-  exits: Partial<Record<Direction, string>>;
-  coin: { x: number; y: number };
-  coinCollected?: boolean;
-  enemies: MobConfig[];
-  weaponPickup?: { x: number; y: number; weaponId: WeaponId };
-  potionPickup?: { x: number; y: number };
-  potionHeal?: number;
-  potionCollected?: boolean;
-  chest?: Chest;
-  stairsDownTile?: { x: number; y: number };
-  stairsUpTile?: { x: number; y: number };
-  obstacles: LayoutObstacle[];
-  voidShardPickup?: { x: number; y: number };
-  voidShardCollected?: boolean;
-  slotMachine?: { x: number; y: number };
-  layoutId?: string;
-}
-
-interface Floor {
-  depth: number;
-  rooms: Record<string, Room>;
-  startRoomId: string;
-  stairsDownRoomId: string;
-}
-
-const WEAPONS: Record<WeaponId, WeaponDef> = {
-  "rusty-sword": {
-    damage: 1,
-    knockback: 18,
-    range: 44,
-    width: 38,
-    cooldownMs: 480,
-    durationMs: 160,
-    maxDurability: 25,
-    name: "Rusty Sword",
-    swingColor: "rgba(255, 120, 40, 0.85)",
-    swingArcScale: 1,
-    swingSpriteSize: 38,
-  },
-  "iron-sword": {
-    damage: 2,
-    knockback: 22,
-    range: 48,
-    width: 40,
-    cooldownMs: 420,
-    durationMs: 150,
-    maxDurability: 40,
-    name: "Iron Sword",
-    swingColor: "rgba(180, 200, 230, 0.9)",
-    swingArcScale: 1.05,
-    swingSpriteSize: 42,
-  },
-  "war-axe": {
-    damage: 3,
-    knockback: 28,
-    range: 40,
-    width: 44,
-    cooldownMs: 560,
-    durationMs: 200,
-    maxDurability: 35,
-    name: "War Axe",
-    swingColor: "rgba(255, 80, 20, 0.9)",
-    swingArcScale: 1.25,
-    swingSpriteSize: 46,
-  },
-  dagger: {
-    damage: 1,
-    knockback: 10,
-    range: 36,
-    width: 28,
-    cooldownMs: 280,
-    durationMs: 120,
-    maxDurability: 50,
-    name: "Dagger",
-    swingColor: "rgba(210, 225, 255, 0.8)",
-    swingArcScale: 0.72,
-    swingSpriteSize: 30,
-  },
-  soulreaver: {
-    damage: 5,
-    knockback: 34,
-    range: 54,
-    width: 44,
-    cooldownMs: 380,
-    durationMs: 170,
-    maxDurability: 90,
-    name: "Soulreaver",
-    swingColor: "rgba(180, 120, 255, 0.95)",
-    swingArcScale: 1.15,
-    swingSpriteSize: 48,
-    rarity: "legendary",
-  },
-  "storm-cleaver": {
-    damage: 4,
-    knockback: 26,
-    range: 50,
-    width: 48,
-    cooldownMs: 260,
-    durationMs: 140,
-    maxDurability: 85,
-    name: "Storm Cleaver",
-    swingColor: "rgba(255, 230, 80, 0.95)",
-    swingArcScale: 1.35,
-    swingSpriteSize: 50,
-    rarity: "legendary",
-  },
-  "blood-reaper": {
-    damage: 7,
-    knockback: 42,
-    range: 52,
-    width: 46,
-    cooldownMs: 620,
-    durationMs: 220,
-    maxDurability: 75,
-    name: "Blood Reaper",
-    swingColor: "rgba(255, 60, 60, 0.95)",
-    swingArcScale: 1.3,
-    swingSpriteSize: 52,
-    rarity: "legendary",
-  },
-  "phantom-blade": {
-    damage: 3,
-    knockback: 14,
-    range: 42,
-    width: 30,
-    cooldownMs: 160,
-    durationMs: 100,
-    maxDurability: 100,
-    name: "Phantom Blade",
-    swingColor: "rgba(200, 240, 255, 0.9)",
-    swingArcScale: 0.8,
-    swingSpriteSize: 34,
-    rarity: "legendary",
-  },
-};
-
-const LEGENDARY_WEAPON_IDS: WeaponId[] = [
-  "soulreaver",
-  "storm-cleaver",
-  "blood-reaper",
-  "phantom-blade",
+const DEBUG_ITEM_CATALOG: DebugGrantEntry[] = [
+  ...ALL_WEAPON_IDS.map((weaponId) => ({ kind: "weapon" as const, weaponId })),
+  { kind: "health-potion", healAmount: 50 },
+  { kind: "strong-potion", healAmount: 80 },
+  { kind: "special", specialId: "dash-boots" },
 ];
 
-const VOID_SHARD_FLOOR_INTERVAL = 5;
-
-const MOB_COLORS: Record<MobType, { normal: string; hit: string }> = {
-  snake: { normal: "lime", hit: "#88ff88" },
-  slime: { normal: "#20b2aa", hit: "#66dddd" },
-  wraith: { normal: "#9932cc", hit: "#cc66ff" },
-  brute: { normal: "#ff8800", hit: "#ffaa44" },
+const ITEM_DEBUG_UI = {
+  panelX: 80,
+  panelY: 28,
+  panelWidth: 640,
+  panelHeight: 360,
+  slotSize: 72,
+  slotGap: 10,
+  gridX: 108,
+  gridY: 88,
+  cols: 4,
 };
-
-const PLAY_WIDTH = canvas.width;
-const PLAY_HEIGHT = canvas.height;
 
 let runSeed = 0;
 let currentDepth = 1;
@@ -486,42 +345,34 @@ const weaponSwing = {
 };
 
 
-const WEAPON_PICKUP_SIZE = 48;
-const SWORD_START_POSITION = { x: 200, y: 116 };
-const FLOOR_MESSAGE_MS = 2500;
-const DESCEND_BONUS = 15;
-
 let floorMessageUntil = 0;
 let floorMessage = "";
 let stairsCooldownUntil = 0;
-const STAIRS_COOLDOWN_MS = 900;
+let stairsPrompt: "down" | "up" | null = null;
 
-const DOOR_HIT_DEPTH = TILE_DRAW_SIZE;
-
-const POTION_PICKUP_SIZE = 34;
-const CHEST_SIZE = 44;
-const VOID_SHARD_SIZE = 34;
-const SLOT_MACHINE_SIZE = 64;
-const SLOT_SPIN_MS = 2600;
-const MAX_INVENTORY_SIZE = 6;
-
-const INVENTORY_UI = {
-  panelX: 120,
-  panelY: 48,
-  panelWidth: 560,
-  panelHeight: 340,
-  slotSize: 72,
-  slotGap: 12,
-  gridX: 148,
-  gridY: 136,
-  cols: 3,
-};
+let hasDash = false;
+let dashCooldownUntil = 0;
+let dashActiveUntil = 0;
+let dashDirection: Direction = "east";
 
 let mapOpen = false;
 let inventoryOpen = false;
+let encyclopediaOpen = false;
+let encyclopediaScroll = 0;
+let debugMenuOpen = false;
+let itemDebugMenuOpen = false;
+let itemDebugHoverIndex = -1;
+let debugGodMode = false;
+let debugInstakill = false;
 let debugMode = false;
 let tileInspection: TileInspection | null = null;
-const inventory: (InventoryItem | null)[] = Array.from({ length: MAX_INVENTORY_SIZE }, () => null);
+let shopOpen = false;
+let inventorySlotCount = MAX_INVENTORY_SIZE;
+let runStats: RunStats = createRunStats();
+const inventory: (InventoryItem | null)[] = Array.from(
+  { length: INVENTORY_ABSOLUTE_MAX },
+  () => null,
+);
 
 const inventoryDrag = {
   fromSlot: -1,
@@ -534,11 +385,16 @@ const inventoryDrag = {
   startY: 0,
 };
 
+let inventoryHoverX = 0;
+let inventoryHoverY = 0;
+
 const INVENTORY_DRAG_THRESHOLD = 6;
 
 let state: GameState = "menu";
 let score = 0;
 let voidShards = 0;
+let scrap = 0;
+let armorTier: ArmorTier = "none";
 
 const slotSpin = {
   activeUntil: 0,
@@ -547,8 +403,8 @@ const slotSpin = {
 };
 
 const hp = {
-  max: 100,
-  current: 100,
+  max: BASE_MAX_HP,
+  current: BASE_MAX_HP,
   invincibilityMs: 1000,
 };
 
@@ -560,6 +416,66 @@ window.addEventListener("keydown", (event) => {
   const key = event.key.toLowerCase();
   keys.add(key);
 
+  if (key === "escape" && state === "playing") {
+    if (itemDebugMenuOpen) {
+      event.preventDefault();
+      itemDebugMenuOpen = false;
+      return;
+    }
+
+    if (debugMenuOpen) {
+      event.preventDefault();
+      debugMenuOpen = false;
+      return;
+    }
+
+    if (shopOpen) {
+      event.preventDefault();
+      toggleShop(false);
+      return;
+    }
+  }
+
+  if (shopOpen && state === "playing") {
+    if (key === "q") {
+      event.preventDefault();
+      handleShopPurchase("health");
+    }
+
+    if (key === "w") {
+      event.preventDefault();
+      handleShopPurchase("strong");
+    }
+
+    if (key === "r") {
+      event.preventDefault();
+      handleShopPurchase("repair");
+    }
+
+    if (key === "t") {
+      event.preventDefault();
+      handleShopPurchase("craft");
+    }
+
+    if (key === "u") {
+      event.preventDefault();
+      handleShopPurchase("dash");
+    }
+
+    if (key === "e" || key === "escape") {
+      event.preventDefault();
+      toggleShop(false);
+    }
+
+    return;
+  }
+
+  if (encyclopediaOpen && state === "playing" && (key === "k" || key === "escape")) {
+    event.preventDefault();
+    toggleEncyclopedia();
+    return;
+  }
+
   if ((event.key === "`" || event.key === "F3") && state === "playing") {
     event.preventDefault();
     debugMode = !debugMode;
@@ -567,6 +483,61 @@ window.addEventListener("keydown", (event) => {
     if (!debugMode) {
       tileInspection = null;
     }
+  }
+
+  if ((event.key === "F4" || event.code === "F4") && state === "playing") {
+    event.preventDefault();
+    itemDebugMenuOpen = false;
+
+    if (debugMenuOpen) {
+      debugMenuOpen = false;
+    } else {
+      debugMenuOpen = true;
+      shopOpen = false;
+      setMapOpen(false);
+      setInventoryOpen(false);
+      encyclopediaOpen = false;
+    }
+
+    return;
+  }
+
+  if ((event.key === "F5" || event.code === "F5") && state === "playing") {
+    event.preventDefault();
+    toggleItemDebugMenu();
+    return;
+  }
+
+  if (itemDebugMenuOpen && state === "playing") {
+    if (key === "escape" || key === "f5") {
+      event.preventDefault();
+      itemDebugMenuOpen = false;
+    }
+
+    return;
+  }
+
+  if (debugMenuOpen && state === "playing") {
+    event.preventDefault();
+    handleDebugMenuKey(key);
+    return;
+  }
+
+  if (stairsPrompt && state === "playing") {
+    if (key === "y" || key === "e") {
+      event.preventDefault();
+      confirmStairsPrompt();
+    } else if (key === "n" || key === "escape") {
+      event.preventDefault();
+      stairsPrompt = null;
+    }
+
+    return;
+  }
+
+  if (key === "shift" && state === "playing") {
+    event.preventDefault();
+    tryDash();
   }
 
   if (key === " " && state === "playing") {
@@ -586,7 +557,12 @@ window.addEventListener("keydown", (event) => {
 
   if (key === "e" && state === "playing") {
     event.preventDefault();
-    tryUseSlotMachine();
+    tryInteract();
+  }
+
+  if (key === "k" && state === "playing") {
+    event.preventDefault();
+    toggleEncyclopedia();
   }
 
   if (key === "1" && state === "playing") {
@@ -628,161 +604,25 @@ window.addEventListener("keydown", (event) => {
     event.preventDefault();
     selectWeaponSlot(5);
   }
+
+  if (key === "0" && state === "playing") {
+    event.preventDefault();
+    useSpecialItem();
+  }
+
+  if (inventoryOpen && state === "playing" && (key === "delete" || key === "backspace")) {
+    event.preventDefault();
+    const hoverSlot = getInventorySlotAt(inventoryHoverX, inventoryHoverY);
+
+    if (hoverSlot !== null) {
+      discardInventoryItem(hoverSlot);
+    }
+  }
 });
 
 window.addEventListener("keyup", (event) => {
   keys.delete(event.key.toLowerCase());
 });
-
-function createRng(seed: number) {
-  let rngState = seed >>> 0;
-
-  return () => {
-    rngState = (rngState * 1664525 + 1013904223) >>> 0;
-    return rngState / 4294967296;
-  };
-}
-
-function randomPosition(rng: () => number, margin = 60) {
-  const maxX = PLAY_WIDTH - margin - 40;
-  const maxY = PLAY_HEIGHT - margin - 40;
-
-  return {
-    x: margin + rng() * Math.max(1, maxX - margin),
-    y: margin + rng() * Math.max(1, maxY - margin),
-  };
-}
-
-function findOpenPosition(
-  rng: () => number,
-  size: number,
-  occupied: { x: number; y: number; w: number; h: number }[],
-) {
-  for (let attempt = 0; attempt < 50; attempt++) {
-    const pos = randomPosition(rng, 72);
-    const candidate = { x: pos.x, y: pos.y, w: size, h: size };
-
-    if (!occupied.some((zone) => boxesOverlap(candidate, zone, 12))) {
-      return pos;
-    }
-  }
-
-  return {
-    x: PLAY_WIDTH / 2 - size / 2,
-    y: PLAY_HEIGHT / 2 + 72,
-  };
-}
-
-function buildRoomOccupied(room: Room) {
-  const occupied: { x: number; y: number; w: number; h: number }[] = [
-    ...getDoorClearZones(room.exits),
-  ];
-
-  if (room.stairsDownTile) {
-    occupied.push(stairsBounds("down", room.stairsDownTile));
-  }
-
-  if (room.stairsUpTile) {
-    occupied.push(stairsBounds("up", room.stairsUpTile));
-  }
-
-  occupied.push(...room.obstacles);
-
-  if (!room.coinCollected) {
-    occupied.push({ x: room.coin.x, y: room.coin.y, w: coin.size, h: coin.size });
-  }
-
-  for (const enemy of room.enemies) {
-    const head = enemy.segments[0];
-
-    if (head) {
-      occupied.push({ x: head.x, y: head.y, w: enemy.size, h: enemy.size });
-    }
-  }
-
-  if (room.weaponPickup) {
-    occupied.push({
-      x: room.weaponPickup.x,
-      y: room.weaponPickup.y,
-      w: WEAPON_PICKUP_SIZE,
-      h: WEAPON_PICKUP_SIZE,
-    });
-  }
-
-  if (room.potionPickup && !room.potionCollected) {
-    occupied.push({
-      x: room.potionPickup.x,
-      y: room.potionPickup.y,
-      w: POTION_PICKUP_SIZE,
-      h: POTION_PICKUP_SIZE,
-    });
-  }
-
-  if (room.chest) {
-    occupied.push({ x: room.chest.x, y: room.chest.y, w: CHEST_SIZE, h: CHEST_SIZE });
-  }
-
-  if (room.voidShardPickup && !room.voidShardCollected) {
-    occupied.push({
-      x: room.voidShardPickup.x,
-      y: room.voidShardPickup.y,
-      w: VOID_SHARD_SIZE,
-      h: VOID_SHARD_SIZE,
-    });
-  }
-
-  if (room.slotMachine) {
-    occupied.push({
-      x: room.slotMachine.x,
-      y: room.slotMachine.y,
-      w: SLOT_MACHINE_SIZE,
-      h: SLOT_MACHINE_SIZE,
-    });
-  }
-
-  return occupied;
-}
-
-function placeVoidShardAndSlotMachine(
-  rooms: Record<string, Room>,
-  startId: string,
-  depth: number,
-  rng: () => number,
-) {
-  if (depth % VOID_SHARD_FLOOR_INTERVAL !== 0) {
-    return;
-  }
-
-  const shardCandidates = Object.values(rooms).filter((room) => room.id !== startId);
-
-  if (shardCandidates.length > 0) {
-    const shardRoom = shardCandidates[Math.floor(rng() * shardCandidates.length)];
-    const shardPos = findOpenPosition(rng, VOID_SHARD_SIZE, buildRoomOccupied(shardRoom));
-
-    shardRoom.voidShardPickup = shardPos;
-    shardRoom.voidShardCollected = false;
-  }
-
-  const startRoom = rooms[startId];
-  const machinePos = findOpenPosition(rng, SLOT_MACHINE_SIZE, buildRoomOccupied(startRoom));
-
-  startRoom.slotMachine = machinePos;
-  startRoom.name = `Depth ${depth} · Shrine Floor`;
-}
-
-function rollRoomLoot(rng: () => number) {
-  const roll = rng();
-
-  if (roll < 0.14) {
-    return "chest" as const;
-  }
-
-  if (roll < 0.32) {
-    return "potion" as const;
-  }
-
-  return "none" as const;
-}
 
 function getPlayerCollisionBox(x = player.x, y = player.y) {
   return {
@@ -793,59 +633,11 @@ function getPlayerCollisionBox(x = player.x, y = player.y) {
   };
 }
 
-function collidesWithPerimeterWalls(
-  box: { x: number; y: number; w: number; h: number },
-  room: Room,
-) {
-  const ts = TILE_DRAW_SIZE;
-  const doorEndX = DOOR_START_X + DOOR_LENGTH;
-  const doorEndY = DOOR_START_Y + DOOR_LENGTH;
-
-  const wallTiles: { x: number; y: number; w: number; h: number }[] = [
-    { x: 0, y: 0, w: ts, h: ts },
-    { x: PLAY_WIDTH - ts, y: 0, w: ts, h: ts },
-    { x: 0, y: PLAY_HEIGHT - ts, w: ts, h: ts },
-    { x: PLAY_WIDTH - ts, y: PLAY_HEIGHT - ts, w: ts, h: ts },
-  ];
-
-  for (let x = ts; x < PLAY_WIDTH - ts; x += ts) {
-    if (!(room.exits.north && x >= DOOR_START_X && x < doorEndX)) {
-      wallTiles.push({ x, y: 0, w: ts, h: ts });
-    }
-
-    if (!(room.exits.south && x >= DOOR_START_X && x < doorEndX)) {
-      wallTiles.push({ x, y: PLAY_HEIGHT - ts, w: ts, h: ts });
-    }
-  }
-
-  for (let y = ts; y < PLAY_HEIGHT - ts; y += ts) {
-    if (!(room.exits.west && y >= DOOR_START_Y && y < doorEndY)) {
-      wallTiles.push({ x: 0, y, w: ts, h: ts });
-    }
-
-    if (!(room.exits.east && y >= DOOR_START_Y && y < doorEndY)) {
-      wallTiles.push({ x: PLAY_WIDTH - ts, y, w: ts, h: ts });
-    }
-  }
-
-  return wallTiles.some((tile) => boxesOverlap(box, tile));
-}
-
-function getRoomObstacles(room = getCurrentRoom()) {
-  return room.obstacles ?? [];
-}
-
 function collidesWithObstacles(
   box: { x: number; y: number; w: number; h: number },
   room = getCurrentRoom(),
 ) {
-  if (collidesWithPerimeterWalls(box, room)) {
-    return true;
-  }
-
-  return getRoomObstacles(room).some((obstacle) =>
-    boxesOverlap(box, obstacleHitbox(obstacle)),
-  );
+  return collidesWithRoomObstacles(box, room);
 }
 
 function resolveObstaclePosition(
@@ -892,28 +684,6 @@ function clampMobToRoom(mob: RuntimeMob, segmentIndex: number) {
   segment.y = resolved.y;
 }
 
-function backgroundForDepth(depth: number, variant: number) {
-  const tints = [
-    "rgba(52, 32, 22, 0.42)",
-    "rgba(44, 24, 18, 0.45)",
-    "rgba(58, 28, 24, 0.4)",
-    "rgba(36, 22, 28, 0.44)",
-    "rgba(48, 30, 18, 0.43)",
-  ];
-
-  return tints[(depth + variant) % tints.length];
-}
-
-function hashRoomSeed(value: string) {
-  let seed = 0;
-
-  for (let i = 0; i < value.length; i++) {
-    seed = (seed * 31 + value.charCodeAt(i)) >>> 0;
-  }
-
-  return seed;
-}
-
 function spriteDrawSize(sprite: HTMLCanvasElement) {
   return {
     w: sprite.width * TILE_SCALE,
@@ -931,278 +701,9 @@ function stairsBounds(kind: "down" | "up", tile: { x: number; y: number }) {
   };
 }
 
-function stairsTilePosition(kind: "down" | "up" = "down") {
-  const sprite = kind === "up" ? SPRITES.stairsUp : SPRITES.stairsDown;
-  const { w, h } = spriteDrawSize(sprite);
-
-  return {
-    x: PLAY_WIDTH / 2 - w / 2,
-    y: PLAY_HEIGHT / 2 - h / 2,
-  };
-}
-
-function contactDamageForDepth(depth: number) {
-  return 6 + Math.floor(depth * 1.25);
-}
-
-function generateMob(type: MobType, depth: number, rng: () => number): MobConfig {
-  const baseContact = contactDamageForDepth(depth);
-  const spawn = randomPosition(rng, 100);
-
-  switch (type) {
-    case "snake": {
-      const segmentCount = Math.min(9, 2 + Math.floor(depth / 2) + Math.floor(rng() * 2));
-      const speed = 1.0 + depth * 0.08 + rng() * 0.25;
-      const maxHp = Math.floor(2 + depth * 1.1 + rng() * 1.5);
-      const segments: { x: number; y: number }[] = [];
-
-      for (let i = 0; i < segmentCount; i++) {
-        segments.push({ x: spawn.x - i * 28, y: spawn.y });
-      }
-
-      return { type, segments, size: 32, speed, maxHp, contactDamage: baseContact };
-    }
-    case "slime":
-      return {
-        type,
-        segments: [{ ...spawn }],
-        size: 30,
-        speed: 0.75 + depth * 0.06 + rng() * 0.12,
-        maxHp: Math.floor(1 + depth * 0.85 + rng()),
-        contactDamage: Math.floor(baseContact * 0.85),
-      };
-    case "wraith":
-      return {
-        type,
-        segments: [{ ...spawn }],
-        size: 28,
-        speed: 1.6 + depth * 0.1 + rng() * 0.2,
-        maxHp: Math.floor(1 + depth * 0.75 + rng()),
-        contactDamage: Math.floor(baseContact * 0.9),
-      };
-    case "brute":
-      return {
-        type,
-        segments: [{ ...spawn }],
-        size: 40,
-        speed: 0.7 + depth * 0.05 + rng() * 0.1,
-        maxHp: Math.floor(3 + depth * 1.8 + rng() * 1.5),
-        contactDamage: Math.floor(baseContact * 1.15),
-      };
-  }
-}
-
-const ALL_MOB_TYPES: MobType[] = ["snake", "slime", "wraith", "brute"];
-
-function generateEnemies(depth: number, rng: () => number, isStartRoom: boolean) {
-  if (isStartRoom && depth === 1) {
-    return [];
-  }
-
-  const count = depth <= 3 ? 1 : rng() < 0.75 ? 1 : 2;
-  const enemies: MobConfig[] = [];
-
-  for (let i = 0; i < count; i++) {
-    const type = ALL_MOB_TYPES[Math.floor(rng() * ALL_MOB_TYPES.length)];
-    enemies.push(generateMob(type, depth, rng));
-  }
-
-  return enemies;
-}
-
-function generateChestLoot(depth: number, rng: () => number): ChestLoot {
-  const roll = rng();
-
-  if (roll < 0.35) {
-    const weaponIds: WeaponId[] = ["iron-sword", "war-axe", "dagger"];
-    return { kind: "weapon", weaponId: weaponIds[Math.floor(rng() * weaponIds.length)] };
-  }
-
-  if (roll < 0.7) {
-    return { kind: "health-potion", healAmount: 30 + Math.floor(depth * 10 + rng() * 10) };
-  }
-
-  return { kind: "strong-potion", healAmount: 55 + Math.floor(depth * 14 + rng() * 12) };
-}
-
-function generateFloor(depth: number, seed: number): Floor {
-  const rng = createRng(seed);
-  const roomCount = Math.min(8, 4 + Math.floor(depth / 2) + Math.floor(rng() * 2));
-  const grid = new Map<string, { id: string; gx: number; gy: number }>();
-  const startId = `d${depth}-r0`;
-
-  grid.set("0,0", { id: startId, gx: 0, gy: 0 });
-
-  const directions = [
-    { dx: 0, dy: -1, dir: "north" as Direction, opposite: "south" as Direction },
-    { dx: 1, dy: 0, dir: "east" as Direction, opposite: "west" as Direction },
-    { dx: 0, dy: 1, dir: "south" as Direction, opposite: "north" as Direction },
-    { dx: -1, dy: 0, dir: "west" as Direction, opposite: "east" as Direction },
-  ];
-
-  while (grid.size < roomCount) {
-    const cells = [...grid.values()];
-    const parent = cells[Math.floor(rng() * cells.length)];
-    const step = directions[Math.floor(rng() * directions.length)];
-    const gx = parent.gx + step.dx;
-    const gy = parent.gy + step.dy;
-    const key = `${gx},${gy}`;
-
-    if (!grid.has(key)) {
-      grid.set(key, { id: `d${depth}-r${grid.size}`, gx, gy });
-    }
-  }
-
-  const rooms: Record<string, Room> = {};
-  let farthestRoomId = startId;
-  let farthestDistance = 0;
-
-  for (const cell of grid.values()) {
-    const exits: Partial<Record<Direction, string>> = {};
-
-    for (const step of directions) {
-      const neighbor = grid.get(`${cell.gx + step.dx},${cell.gy + step.dy}`);
-
-      if (neighbor) {
-        exits[step.dir] = neighbor.id;
-      }
-    }
-
-    const distance = Math.abs(cell.gx) + Math.abs(cell.gy);
-
-    if (distance > farthestDistance) {
-      farthestDistance = distance;
-      farthestRoomId = cell.id;
-    }
-
-    const isStartRoom = cell.id === startId;
-    const occupied: { x: number; y: number; w: number; h: number }[] = [
-      ...getDoorClearZones(exits),
-    ];
-    const downStairs = spriteDrawSize(SPRITES.stairsDown);
-    occupied.push({
-      x: PLAY_WIDTH / 2 - downStairs.w / 2,
-      y: PLAY_HEIGHT / 2 - downStairs.h / 2,
-      w: downStairs.w,
-      h: downStairs.h,
-    });
-
-    const rawLayout =
-      isStartRoom && depth === 1
-        ? ROOM_LAYOUTS.find((entry) => entry.id === "start")!
-        : pickRoomLayout(rng, isStartRoom);
-    const layout = clearDoorCorridors(rawLayout, exits);
-    const obstacles = layoutToObstacles(layout, occupied);
-    occupied.push(...obstacles);
-
-    const coinPos = findLayoutPosition(rng, coin.size, occupied, layout);
-    occupied.push({ x: coinPos.x, y: coinPos.y, w: coin.size, h: coin.size });
-
-    rooms[cell.id] = {
-      id: cell.id,
-      name: `Depth ${depth} · ${layout.label}`,
-      background: backgroundForDepth(depth, Math.floor(rng() * 5)),
-      gridX: cell.gx,
-      gridY: cell.gy,
-      exits,
-      coin: coinPos,
-      coinCollected: false,
-      enemies: [],
-      obstacles,
-      layoutId: layout.id,
-    };
-
-    const enemies = generateEnemies(depth, rng, isStartRoom);
-
-    for (const enemy of enemies) {
-      const spawn = findLayoutPosition(rng, enemy.size, occupied, layout);
-
-      if (enemy.type === "snake") {
-        const segmentCount = enemy.segments.length;
-
-        enemy.segments = [];
-
-        for (let s = 0; s < segmentCount; s++) {
-          enemy.segments.push({ x: spawn.x - s * 28, y: spawn.y });
-        }
-      } else {
-        enemy.segments = [{ x: spawn.x, y: spawn.y }];
-      }
-
-      occupied.push({ x: spawn.x, y: spawn.y, w: enemy.size, h: enemy.size });
-      rooms[cell.id].enemies.push(enemy);
-    }
-
-    if (!(isStartRoom && depth === 1)) {
-      const loot = rollRoomLoot(rng);
-
-      if (loot === "potion") {
-        const potionPos = findLayoutPosition(rng, POTION_PICKUP_SIZE, occupied, layout);
-        occupied.push({
-          x: potionPos.x,
-          y: potionPos.y,
-          w: POTION_PICKUP_SIZE,
-          h: POTION_PICKUP_SIZE,
-        });
-        rooms[cell.id].potionPickup = potionPos;
-        rooms[cell.id].potionHeal = 30 + Math.floor(depth * 12 + rng() * 10);
-      } else if (loot === "chest") {
-        const chestPos = findLayoutPosition(rng, CHEST_SIZE, occupied, layout);
-        occupied.push({
-          x: chestPos.x,
-          y: chestPos.y,
-          w: CHEST_SIZE,
-          h: CHEST_SIZE,
-        });
-        rooms[cell.id].chest = {
-          x: chestPos.x,
-          y: chestPos.y,
-          opened: false,
-          loot: generateChestLoot(depth, rng),
-        };
-      }
-    }
-  }
-
-  rooms[farthestRoomId].stairsDownTile = stairsTilePosition("down");
-
-  if (depth > 1) {
-    rooms[startId].stairsUpTile = stairsTilePosition("up");
-  }
-
-  if (depth === 1) {
-    rooms[startId].weaponPickup = { ...SWORD_START_POSITION, weaponId: "rusty-sword" };
-    rooms[startId].potionPickup = { x: 280, y: 200 };
-    rooms[startId].potionHeal = 45;
-    rooms[startId].potionCollected = false;
-    rooms[startId].enemies = [
-      {
-        type: "snake",
-        segments: [
-          { x: 560, y: 310 },
-          { x: 590, y: 310 },
-        ],
-        size: 32,
-        speed: 1.2,
-        maxHp: 3,
-        contactDamage: contactDamageForDepth(1),
-      },
-    ];
-  }
-
-  placeVoidShardAndSlotMachine(rooms, startId, depth, rng);
-
-  return {
-    depth,
-    rooms,
-    startRoomId: startId,
-    stairsDownRoomId: farthestRoomId,
-  };
-}
-
 function ensureFloor(depth: number) {
   if (!floors.has(depth)) {
-    floors.set(depth, generateFloor(depth, runSeed + depth * 9973));
+    floors.set(depth, generateFloor(depth, runSeed + depth * 9973, coin.size));
   }
 }
 
@@ -1224,6 +725,8 @@ function setMapOpen(open: boolean) {
 
   if (open) {
     setInventoryOpen(false);
+    shopOpen = false;
+    encyclopediaOpen = false;
   }
 }
 
@@ -1234,6 +737,292 @@ function setInventoryOpen(open: boolean) {
 
   if (open) {
     setMapOpen(false);
+    shopOpen = false;
+    encyclopediaOpen = false;
+  }
+}
+
+function setMenuLeaderboardOpen(open: boolean) {
+  menuLeaderboardEl.classList.toggle("hidden", !open);
+
+  if (open) {
+    menuHelpEl.classList.add("hidden");
+    renderLeaderboard();
+  }
+}
+
+function renderLeaderboard() {
+  const entries = loadLeaderboard();
+
+  if (entries.length === 0) {
+    leaderboardListEl.innerHTML = `<p class="leaderboard-empty">No runs recorded yet. Delve and fall gloriously!</p>`;
+    return;
+  }
+
+  leaderboardListEl.innerHTML = entries
+    .map(
+      (entry, index) => `
+      <div class="leaderboard-row">
+        <span class="leaderboard-rank">#${index + 1}</span>
+        <span class="leaderboard-score">${entry.score} pts</span>
+        <span class="leaderboard-depth">Depth ${entry.deepestDepth}</span>
+        <span class="leaderboard-kills">${entry.enemiesKilled} kills</span>
+        <span class="leaderboard-weapon">${formatBestWeapon(entry.bestWeaponId)}</span>
+        <span class="leaderboard-time">${formatDuration(entry.durationMs)}</span>
+      </div>`,
+    )
+    .join("");
+}
+
+function handleDebugMenuKey(key: string) {
+  switch (key) {
+    case "escape":
+      debugMenuOpen = false;
+      break;
+    case "g":
+      debugGodMode = !debugGodMode;
+      showFloorMessage(debugGodMode ? "God mode ON" : "God mode OFF");
+      break;
+    case "k":
+      debugInstakill = !debugInstakill;
+      showFloorMessage(debugInstakill ? "Instakill ON" : "Instakill OFF");
+      break;
+    case "h":
+      hp.current = hp.max;
+      showFloorMessage("Healed to full.");
+      break;
+    case "c":
+      score += 50;
+      showFloorMessage("+50 coins");
+      break;
+    case "s":
+      scrap += 10;
+      showFloorMessage("+10 scrap");
+      break;
+    case "w": {
+      const weaponId = ALL_WEAPON_IDS[Math.floor(Math.random() * ALL_WEAPON_IDS.length)];
+      addWeaponToInventory(weaponId);
+      showFloorMessage(`Spawned ${WEAPONS[weaponId].name}`);
+      break;
+    }
+    case "p": {
+      const room = getCurrentRoom();
+      room.weaponPickup = {
+        x: player.x + 20,
+        y: player.y,
+        weaponId: LEGENDARY_WEAPON_IDS[Math.floor(Math.random() * LEGENDARY_WEAPON_IDS.length)],
+      };
+      showFloorMessage("Legendary weapon spawned nearby.");
+      break;
+    }
+    case "t":
+      debugTeleportToStairs();
+      break;
+    case "n":
+      debugTeleportNextRoom();
+      break;
+    case "d":
+      if (currentDepth < 50) {
+        descendFloor();
+      }
+      break;
+    case "i":
+      itemDebugMenuOpen = true;
+      debugMenuOpen = false;
+      itemDebugHoverIndex = -1;
+      break;
+  }
+}
+
+function debugTeleportToStairs() {
+  saveMobsToRoom();
+  loadRoom(getCurrentFloor().stairsDownRoomId);
+  const room = getCurrentRoom();
+
+  if (room.stairsDownTile) {
+    spawnAtTile(room.stairsDownTile, false, "down");
+  }
+
+  showFloorMessage("Teleported to stairs room.");
+}
+
+function debugTeleportNextRoom() {
+  const room = getCurrentRoom();
+  const exits = Object.entries(room.exits) as [Direction, string][];
+
+  if (exits.length === 0) {
+    return;
+  }
+
+  const [dir, roomId] = exits[0];
+  const enteredFrom =
+    dir === "north"
+      ? "south"
+      : dir === "south"
+        ? "north"
+        : dir === "east"
+          ? "west"
+          : "east";
+
+  changeRoom(roomId, enteredFrom);
+  showFloorMessage(`Teleported ${dir}.`);
+}
+
+function toggleItemDebugMenu(open?: boolean) {
+  itemDebugMenuOpen = open ?? !itemDebugMenuOpen;
+  itemDebugHoverIndex = -1;
+
+  if (itemDebugMenuOpen) {
+    debugMenuOpen = false;
+    shopOpen = false;
+    setMapOpen(false);
+    setInventoryOpen(false);
+    encyclopediaOpen = false;
+  }
+}
+
+function getItemDebugSlotRect(index: number) {
+  const col = index % ITEM_DEBUG_UI.cols;
+  const row = Math.floor(index / ITEM_DEBUG_UI.cols);
+
+  return {
+    x: ITEM_DEBUG_UI.gridX + col * (ITEM_DEBUG_UI.slotSize + ITEM_DEBUG_UI.slotGap),
+    y: ITEM_DEBUG_UI.gridY + row * (ITEM_DEBUG_UI.slotSize + ITEM_DEBUG_UI.slotGap),
+    w: ITEM_DEBUG_UI.slotSize,
+    h: ITEM_DEBUG_UI.slotSize,
+  };
+}
+
+function getItemDebugSlotAt(x: number, y: number) {
+  for (let i = 0; i < DEBUG_ITEM_CATALOG.length; i++) {
+    const rect = getItemDebugSlotRect(i);
+
+    if (x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h) {
+      return i;
+    }
+  }
+
+  return null;
+}
+
+function grantDebugItem(entry: DebugGrantEntry) {
+  if (entry.kind === "weapon") {
+    const slot = addWeaponToInventory(entry.weaponId);
+
+    if (slot !== null) {
+      showFloorMessage(`Debug: ${WEAPONS[entry.weaponId].name} added`);
+    }
+
+    return;
+  }
+
+  if (entry.kind === "special") {
+    if (addToInventory({ type: "special", specialId: entry.specialId }) !== null) {
+      showFloorMessage(`Debug: ${SPECIAL_ITEMS[entry.specialId].name} added`);
+    }
+
+    return;
+  }
+
+  if (addToInventory({ type: entry.kind, healAmount: entry.healAmount }) !== null) {
+    const label = entry.kind === "strong-potion" ? "Strong Potion" : "Health Potion";
+    showFloorMessage(`Debug: ${label} (+${entry.healAmount} HP) added`);
+  }
+}
+
+function toggleEncyclopedia() {
+  encyclopediaOpen = !encyclopediaOpen;
+  encyclopediaScroll = 0;
+
+  if (encyclopediaOpen) {
+    setMapOpen(false);
+    setInventoryOpen(false);
+    shopOpen = false;
+    debugMenuOpen = false;
+  }
+}
+
+function toggleEncyclopediaScroll(delta: number) {
+  if (!encyclopediaOpen) {
+    return;
+  }
+
+  const entryHeight = 78;
+  const visibleHeight = 250;
+  const maxScroll = Math.max(0, ALL_WEAPON_IDS.length * entryHeight - visibleHeight);
+  encyclopediaScroll = Math.max(0, Math.min(maxScroll, encyclopediaScroll + delta));
+}
+
+function toggleShop(open: boolean) {
+  shopOpen = open;
+
+  if (open) {
+    setMapOpen(false);
+    setInventoryOpen(false);
+    encyclopediaOpen = false;
+  }
+}
+
+function tryInteract() {
+  const room = getCurrentRoom();
+  const playerBox = getPlayerCollisionBox();
+
+  if (isNearShopStation(room, playerBox)) {
+    toggleShop(true);
+    return;
+  }
+
+  if (room.slotMachine && isNearSlotMachine()) {
+    tryUseSlotMachine();
+  }
+}
+
+function handleShopPurchase(choice: "health" | "strong" | "repair" | "craft" | "dash") {
+  const scoreRef = { value: score };
+  const scrapRef = { value: scrap };
+  const armorRef = { value: armorTier };
+  let message: string | null = null;
+
+  if (choice === "health") {
+    const result = tryBuyHealthPotion(scoreRef);
+
+    if (result?.startsWith("bought:")) {
+      const heal = Number(result.split(":")[1]);
+      addToInventory({ type: "health-potion", healAmount: heal });
+      message = `Bought health potion (+${heal} HP)`;
+    } else {
+      message = result;
+    }
+  } else if (choice === "strong") {
+    const result = tryBuyStrongPotion(scoreRef);
+
+    if (result?.startsWith("bought-strong:")) {
+      const heal = Number(result.split(":")[1]);
+      addToInventory({ type: "strong-potion", healAmount: heal });
+      message = `Bought strong potion (+${heal} HP)`;
+    } else {
+      message = result;
+    }
+  } else if (choice === "repair") {
+    message = tryBuyWeaponRepair(scoreRef, inventory, activeWeaponSlot);
+  } else if (choice === "dash") {
+    message = tryBuySpecialItem(scoreRef, "dash-boots", hasDash);
+
+    if (message?.startsWith("bought-special:")) {
+      const specialId = message.split(":")[1] as SpecialItemId;
+      addToInventory({ type: "special", specialId });
+      message = `Bought ${SPECIAL_ITEMS[specialId].name}`;
+    }
+  } else {
+    message = tryCraftArmor(scrapRef, armorRef, hp);
+    armorTier = armorRef.value;
+  }
+
+  score = scoreRef.value;
+  scrap = scrapRef.value;
+
+  if (message) {
+    showFloorMessage(message);
   }
 }
 
@@ -1269,7 +1058,7 @@ function getInventorySlotRect(slot: number) {
 }
 
 function getInventorySlotAt(x: number, y: number) {
-  for (let slot = 0; slot < MAX_INVENTORY_SIZE; slot++) {
+  for (let slot = 0; slot < inventorySlotCount; slot++) {
     const rect = getInventorySlotRect(slot);
 
     if (x >= rect.x && x < rect.x + rect.w && y >= rect.y && y < rect.y + rect.h) {
@@ -1298,6 +1087,40 @@ function moveInventoryItem(fromSlot: number, toSlot: number) {
   }
 }
 
+function discardInventoryItem(slot: number) {
+  const item = inventory[slot];
+
+  if (!item) {
+    return;
+  }
+
+  const label =
+    item.type === "weapon" && item.weaponId
+      ? WEAPONS[item.weaponId].name
+      : item.type === "special" && item.specialId
+        ? SPECIAL_ITEMS[item.specialId].name
+        : item.type === "strong-potion"
+          ? "Strong potion"
+          : item.type === "health-potion"
+            ? "Health potion"
+            : "Item";
+
+  inventory[slot] = null;
+
+  if (slot === activeWeaponSlot) {
+    activeWeaponSlot = null;
+    ensureActiveWeaponSlot();
+  }
+
+  showFloorMessage(`Discarded ${label}.`);
+}
+
+function isPointInInventoryPanel(x: number, y: number) {
+  const { panelX, panelY, panelWidth, panelHeight } = INVENTORY_UI;
+
+  return x >= panelX && x <= panelX + panelWidth && y >= panelY && y <= panelY + panelHeight;
+}
+
 function toggleInventory() {
   setInventoryOpen(!inventoryOpen);
 }
@@ -1322,6 +1145,7 @@ function applyRoomState(room: Room) {
   weaponSwing.lastMobDamagedSwing = 0;
   weaponSwing.lastObstacleDamagedSwing = 0;
   weaponSwing.weaponId = null;
+  clearGolemEffects();
 
   for (let i = 0; i < room.enemies.length; i++) {
     const config = room.enemies[i];
@@ -1340,6 +1164,7 @@ function applyRoomState(room: Room) {
       maxHp: config.maxHp,
       contactDamage: config.contactDamage,
       hitFlashUntil: 0,
+      golemState: config.type === "boss" ? createGolemBossState() : undefined,
     });
   }
 }
@@ -1376,11 +1201,11 @@ function isRoomVisited(depth: number, roomId: string) {
 }
 
 function countInventoryItems() {
-  return inventory.filter((slot) => slot !== null).length;
+  return inventory.slice(0, inventorySlotCount).filter((slot) => slot !== null).length;
 }
 
 function findFirstEmptySlot() {
-  return inventory.findIndex((slot) => slot === null);
+  return inventory.slice(0, inventorySlotCount).findIndex((slot) => slot === null);
 }
 
 function getWeaponDurability(item: InventoryItem) {
@@ -1432,9 +1257,9 @@ function ensureActiveWeaponSlot() {
     return;
   }
 
-  const nextWeaponSlot = inventory.findIndex(
-    (item) => item?.type === "weapon" && item.weaponId && getWeaponDurability(item) > 0,
-  );
+  const nextWeaponSlot = inventory
+    .slice(0, inventorySlotCount)
+    .findIndex((item) => item?.type === "weapon" && item.weaponId && getWeaponDurability(item) > 0);
 
   activeWeaponSlot = nextWeaponSlot >= 0 ? nextWeaponSlot : null;
 }
@@ -1451,12 +1276,21 @@ function consumeWeaponDurability(amount: number) {
 
   if (durability <= 0) {
     const name = WEAPONS[item.weaponId!].name;
-    showFloorMessage(`Your ${name} broke!`);
+    const brokenSlot = activeWeaponSlot;
+    inventory[brokenSlot] = null;
+
+    if (activeWeaponSlot === brokenSlot) {
+      activeWeaponSlot = null;
+    }
+
+    showFloorMessage(`Your ${name} broke and was discarded!`);
     ensureActiveWeaponSlot();
   }
 }
 
 function addWeaponToInventory(weaponId: WeaponId, durability = WEAPONS[weaponId].maxDurability) {
+  recordWeaponDiscovered(weaponId);
+
   const slot = addToInventory({
     type: "weapon",
     weaponId,
@@ -1477,7 +1311,12 @@ function addWeaponToInventory(weaponId: WeaponId, durability = WEAPONS[weaponId]
 function loadRoom(roomId: string) {
   currentRoomId = roomId;
   markRoomVisited();
-  applyRoomState(getCurrentRoom());
+  const room = getCurrentRoom();
+  applyRoomState(room);
+
+  if (room.isBossRoom && !room.bossDefeated && room.enemies.some((e) => (e.currentHp ?? e.maxHp) > 0)) {
+    showFloorMessage("Mecha Stone Golem awakens!");
+  }
 }
 
 function getExploredDepths() {
@@ -1515,6 +1354,7 @@ function spawnFromDirection(direction: Direction) {
 
 function changeRoom(roomId: string, enteredFrom: Direction) {
   saveMobsToRoom();
+  stairsPrompt = null;
   loadRoom(roomId);
   spawnFromDirection(enteredFrom);
 }
@@ -1546,6 +1386,7 @@ function descendFloor() {
   }
 
   stairsCooldownUntil = performance.now() + STAIRS_COOLDOWN_MS;
+  stairsPrompt = null;
   showFloorMessage(`Descended to Depth ${currentDepth}`);
 }
 
@@ -1567,16 +1408,30 @@ function ascendFloor() {
   }
 
   stairsCooldownUntil = performance.now() + STAIRS_COOLDOWN_MS;
+  stairsPrompt = null;
   showFloorMessage(`Ascended to Depth ${currentDepth}`);
 }
 
 function resetGame() {
   score = 0;
   voidShards = 0;
+  scrap = 0;
+  armorTier = "none";
+  inventorySlotCount = MAX_INVENTORY_SIZE;
+  runStats = createRunStats();
+  debugMenuOpen = false;
+  itemDebugMenuOpen = false;
+  debugGodMode = false;
+  debugInstakill = false;
+  encyclopediaScroll = 0;
+  resetWeaponEncyclopedia();
+  shopOpen = false;
+  encyclopediaOpen = false;
   slotSpin.activeUntil = 0;
   slotSpin.resultWeaponId = null;
   slotSpin.startedAt = 0;
-  hp.current = hp.max;
+  hp.max = BASE_MAX_HP;
+  hp.current = BASE_MAX_HP;
   invincibleUntil = 0;
   inventory.fill(null);
   inventory[0] = {
@@ -1584,10 +1439,15 @@ function resetGame() {
     weaponId: "rusty-sword",
     weaponDurability: WEAPONS["rusty-sword"].maxDurability,
   };
+  recordWeaponDiscovered("rusty-sword");
   activeWeaponSlot = 0;
   floorMessageUntil = 0;
   floorMessage = "";
   stairsCooldownUntil = 0;
+  stairsPrompt = null;
+  hasDash = false;
+  dashCooldownUntil = 0;
+  dashActiveUntil = 0;
   visitedRooms.clear();
   setMapOpen(false);
   setInventoryOpen(false);
@@ -1601,19 +1461,6 @@ function resetGame() {
   ensureFloor(1);
   loadRoom(getCurrentFloor().startRoomId);
   keys.clear();
-}
-
-function boxesOverlap(
-  a: { x: number; y: number; w: number; h: number },
-  b: { x: number; y: number; w: number; h: number },
-  padding = 0,
-) {
-  return (
-    a.x < b.x + b.w + padding &&
-    a.x + a.w + padding > b.x &&
-    a.y < b.y + b.h + padding &&
-    a.y + a.h + padding > b.y
-  );
 }
 
 function getSwingHitbox() {
@@ -1669,12 +1516,50 @@ function getSwingArcAngles(arcScale = 1) {
 }
 
 function slayMob(mob: RuntimeMob) {
-  mob.segments = [];
-  mob.hp = 0;
   const room = getCurrentRoom();
+  const head = mob.segments[0];
   const config = room.enemies[mob.configIndex];
   config.currentHp = 0;
-  score += 3;
+  mob.segments = [];
+  mob.hp = 0;
+  score += mob.type === "boss" ? 25 : 3;
+
+  const weaponId = getActiveWeaponItem()?.weaponId ?? null;
+  recordMobKill(runStats, weaponId);
+
+  const lifeSteal = weaponId ? getLifeStealOnKill(weaponId) : 0;
+
+  if (lifeSteal > 0) {
+    hp.current = Math.min(hp.max, hp.current + lifeSteal);
+  }
+
+  if (mob.type === "boss" && head) {
+    room.bossDefeated = true;
+    room.bossHeartPickup = { x: head.x - 24, y: head.y };
+    room.bossWeaponPickup = {
+      x: head.x + 36,
+      y: head.y,
+      weaponId: LEGENDARY_WEAPON_IDS[Math.floor(Math.random() * LEGENDARY_WEAPON_IDS.length)],
+    };
+    showFloorMessage("Boss defeated! Claim the Heart Container and legendary weapon.");
+    return;
+  }
+
+  if (head && mob.type !== "boss") {
+    const amount = 1 + Math.floor(Math.random() * 2);
+    room.scrapPickups = room.scrapPickups ?? [];
+    room.scrapPickups.push({ x: head.x, y: head.y, amount });
+  }
+}
+
+function applyWeaponHitToMob(mob: RuntimeMob) {
+  const activeItem = getActiveWeaponItem()!;
+  const weaponId = activeItem.weaponId!;
+  const def = WEAPONS[weaponId];
+  const damage = getEffectiveDamage(weaponId, def.damage, mob, debugInstakill);
+
+  damageMob(mob, damage);
+  applyKnockback(mob, def.knockback);
 }
 
 function damageMob(mob: RuntimeMob, amount: number) {
@@ -1687,7 +1572,17 @@ function damageMob(mob: RuntimeMob, amount: number) {
   getCurrentRoom().enemies[mob.configIndex].currentHp = mob.hp;
 
   if (mob.hp <= 0) {
+    if (mob.type === "boss" && mob.golemState && mob.golemState.phase !== "dying") {
+      startGolemDeath(mob.golemState);
+      return;
+    }
+
     slayMob(mob);
+    return;
+  }
+
+  if (mob.type === "boss" && mob.golemState) {
+    triggerGolemHurt(mob.golemState);
   }
 }
 
@@ -1750,8 +1645,15 @@ function tryAttack() {
   weaponSwing.swingArcScale = def.swingArcScale;
   weaponSwing.swingSpriteSize = def.swingSpriteSize;
   checkWeaponMobHits();
-  checkWeaponObstacleHits();
-  consumeWeaponDurability(1);
+  const hitObstacle = checkWeaponObstacleHits();
+  const weaponId = activeItem.weaponId!;
+
+  if (
+    !shouldSkipDurabilityLoss(weaponId) &&
+    (weaponSwing.lastMobDamagedSwing === weaponSwing.lastAttackAt || hitObstacle)
+  ) {
+    consumeWeaponDurability(1);
+  }
 }
 
 function getWeaponPickupPosition() {
@@ -1796,8 +1698,10 @@ function checkWeaponMobHits() {
     return;
   }
 
-  const def = getEquippedWeaponDef();
+  const activeItem = getActiveWeaponItem()!;
+  const weaponId = activeItem.weaponId!;
   const hitbox = getSwingHitbox();
+  let primaryMob: RuntimeMob | null = null;
 
   for (const mob of activeMobs) {
     if (!isMobAlive(mob)) {
@@ -1813,9 +1717,42 @@ function checkWeaponMobHits() {
           h: mob.size,
         })
       ) {
-        weaponSwing.lastMobDamagedSwing = weaponSwing.lastAttackAt;
-        damageMob(mob, def.damage);
-        applyKnockback(mob, def.knockback);
+        primaryMob = mob;
+        break;
+      }
+    }
+
+    if (primaryMob) {
+      break;
+    }
+  }
+
+  if (!primaryMob) {
+    return;
+  }
+
+  weaponSwing.lastMobDamagedSwing = weaponSwing.lastAttackAt;
+  applyWeaponHitToMob(primaryMob);
+
+  if (!shouldChainStrike(weaponId)) {
+    return;
+  }
+
+  for (const mob of activeMobs) {
+    if (!isMobAlive(mob) || mob === primaryMob) {
+      continue;
+    }
+
+    for (const segment of mob.segments) {
+      if (
+        boxesOverlap(hitbox, {
+          x: segment.x,
+          y: segment.y,
+          w: mob.size,
+          h: mob.size,
+        })
+      ) {
+        applyWeaponHitToMob(mob);
         return;
       }
     }
@@ -1824,11 +1761,11 @@ function checkWeaponMobHits() {
 
 function checkWeaponObstacleHits() {
   if (!hasUsableWeapon()) {
-    return;
+    return false;
   }
 
   if (weaponSwing.lastAttackAt === weaponSwing.lastObstacleDamagedSwing) {
-    return;
+    return false;
   }
 
   const def = getEquippedWeaponDef();
@@ -1852,6 +1789,8 @@ function checkWeaponObstacleHits() {
   if (hitAny) {
     weaponSwing.lastObstacleDamagedSwing = weaponSwing.lastAttackAt;
   }
+
+  return hitAny;
 }
 
 function updateFacing() {
@@ -1903,6 +1842,22 @@ function endGame() {
   keys.clear();
   setMapOpen(false);
   setInventoryOpen(false);
+  shopOpen = false;
+  debugMenuOpen = false;
+
+  runStats.score = score;
+  runStats.deepestDepth = deepestDepth;
+
+  saveRunToLeaderboard({
+    id: `${Date.now()}`,
+    finishedAt: Date.now(),
+    score,
+    deepestDepth,
+    enemiesKilled: runStats.enemiesKilled,
+    bestWeaponId: getBestWeapon(runStats),
+    durationMs: Date.now() - runStats.startedAt,
+  });
+
   finalScoreEl.textContent = String(score);
   finalDepthEl.textContent = String(deepestDepth);
 
@@ -1912,6 +1867,7 @@ function endGame() {
 
 function tryUseStairs() {
   if (performance.now() < stairsCooldownUntil) {
+    stairsPrompt = null;
     return;
   }
 
@@ -1919,23 +1875,84 @@ function tryUseStairs() {
   const playerBox = { x: player.x, y: player.y, w: player.size, h: player.size };
 
   if (room.stairsDownTile) {
-    const tile = room.stairsDownTile;
-    const bounds = stairsBounds("down", tile);
+    const bounds = stairsBounds("down", room.stairsDownTile);
 
     if (boxesOverlap(playerBox, bounds)) {
-      descendFloor();
+      if (room.isBossRoom && !room.bossDefeated) {
+        showFloorMessage("Defeat the boss first!");
+        stairsPrompt = null;
+        return;
+      }
+
+      stairsPrompt = "down";
       return;
     }
   }
 
   if (room.stairsUpTile) {
-    const tile = room.stairsUpTile;
-    const bounds = stairsBounds("up", tile);
+    const bounds = stairsBounds("up", room.stairsUpTile);
 
     if (boxesOverlap(playerBox, bounds)) {
-      ascendFloor();
+      stairsPrompt = "up";
+      return;
     }
   }
+
+  stairsPrompt = null;
+}
+
+function confirmStairsPrompt() {
+  if (!stairsPrompt) {
+    return;
+  }
+
+  if (stairsPrompt === "down") {
+    descendFloor();
+  } else {
+    ascendFloor();
+  }
+
+  stairsPrompt = null;
+}
+
+function grantDash() {
+  if (hasDash) {
+    return false;
+  }
+
+  hasDash = true;
+  showFloorMessage("Dash Boots equipped! Press Shift to dash.");
+  return true;
+}
+
+function useSpecialItem() {
+  const specialIndex = inventory.findIndex((item) => item?.type === "special");
+
+  if (specialIndex === -1) {
+    showFloorMessage("No special items.");
+    return;
+  }
+
+  const item = inventory[specialIndex]!;
+
+  if (item.specialId === "dash-boots") {
+    if (grantDash()) {
+      inventory[specialIndex] = null;
+    } else {
+      showFloorMessage("You already have dash.");
+    }
+  }
+}
+
+function tryDash() {
+  if (!hasDash || performance.now() < dashCooldownUntil || performance.now() < dashActiveUntil) {
+    return;
+  }
+
+  dashDirection = playerFacing;
+  dashActiveUntil = performance.now() + DASH_DURATION_MS;
+  dashCooldownUntil = performance.now() + DASH_COOLDOWN_MS;
+  invincibleUntil = Math.max(invincibleUntil, dashActiveUntil);
 }
 
 function getDoorHitbox(direction: Direction, room: Room) {
@@ -2004,20 +2021,39 @@ function movePlayer() {
   const prevX = player.x;
   const prevY = player.y;
 
-  if (keys.has("w") || keys.has("arrowup")) {
-    player.y -= player.speed;
-  }
+  if (performance.now() < dashActiveUntil) {
+    const burst = DASH_SPEED;
 
-  if (keys.has("s") || keys.has("arrowdown")) {
-    player.y += player.speed;
-  }
+    switch (dashDirection) {
+      case "north":
+        player.y -= burst;
+        break;
+      case "south":
+        player.y += burst;
+        break;
+      case "west":
+        player.x -= burst;
+        break;
+      case "east":
+        player.x += burst;
+        break;
+    }
+  } else {
+    if (keys.has("w") || keys.has("arrowup")) {
+      player.y -= player.speed;
+    }
 
-  if (keys.has("a") || keys.has("arrowleft")) {
-    player.x -= player.speed;
-  }
+    if (keys.has("s") || keys.has("arrowdown")) {
+      player.y += player.speed;
+    }
 
-  if (keys.has("d") || keys.has("arrowright")) {
-    player.x += player.speed;
+    if (keys.has("a") || keys.has("arrowleft")) {
+      player.x -= player.speed;
+    }
+
+    if (keys.has("d") || keys.has("arrowright")) {
+      player.x += player.speed;
+    }
   }
 
   updateFacing();
@@ -2056,7 +2092,7 @@ function isPlayerInvincible() {
 }
 
 function takeDamage(amount: number) {
-  if (isPlayerInvincible()) {
+  if (debugGodMode || isPlayerInvincible()) {
     return;
   }
 
@@ -2071,6 +2107,10 @@ function takeDamage(amount: number) {
 function isPlayerHitByMobs() {
   for (const mob of activeMobs) {
     if (!isMobAlive(mob)) {
+      continue;
+    }
+
+    if (mob.type === "boss" && mob.golemState && !isGolemBossContactActive(mob.golemState)) {
       continue;
     }
 
@@ -2102,6 +2142,10 @@ function tryCollectCoin() {
 
 function moveMob(mob: RuntimeMob) {
   if (!isMobAlive(mob)) {
+    return;
+  }
+
+  if (mob.type === "boss" && mob.golemState) {
     return;
   }
 
@@ -2138,7 +2182,32 @@ function moveMob(mob: RuntimeMob) {
 
 function moveMobs() {
   for (const mob of activeMobs) {
-    moveMob(mob);
+    if (mob.type === "boss" && mob.golemState) {
+      if (mob.golemState.phase !== "dying") {
+        updateGolemBoss(
+          mob,
+          mob.golemState,
+          player.x,
+          player.y,
+          player.size,
+          (target) => clampMobToRoom(target, 0),
+          takeDamage,
+        );
+      }
+    } else {
+      moveMob(mob);
+    }
+  }
+
+  for (const mob of activeMobs) {
+    if (
+      mob.type === "boss" &&
+      mob.golemState &&
+      isGolemDeathComplete(mob.golemState) &&
+      isMobAlive(mob)
+    ) {
+      slayMob(mob);
+    }
   }
 }
 
@@ -2234,9 +2303,68 @@ function collectChestLoot(loot: ChestLoot) {
     return;
   }
 
+  if (loot.kind === "special") {
+    if (loot.specialId === "dash-boots" && hasDash) {
+      if (addToInventory({ type: "special", specialId: loot.specialId }) !== null) {
+        showFloorMessage(`${SPECIAL_ITEMS[loot.specialId].name} collected (spare pair).`);
+      }
+
+      return;
+    }
+
+    if (loot.specialId === "dash-boots" && grantDash()) {
+      return;
+    }
+
+    if (addToInventory({ type: "special", specialId: loot.specialId }) !== null) {
+      showFloorMessage(`${SPECIAL_ITEMS[loot.specialId].name} collected — press 0 to use`);
+    }
+
+    return;
+  }
+
   if (addToInventory({ type: loot.kind, healAmount: loot.healAmount }) !== null) {
     const label = loot.kind === "strong-potion" ? "Strong potion" : "Health potion";
     showFloorMessage(`${label} collected (+${loot.healAmount} HP)`);
+  }
+}
+
+function tryPickupSpecial() {
+  const room = getCurrentRoom();
+
+  if (!room.specialPickup || room.specialPickupCollected) {
+    return;
+  }
+
+  const pickup = room.specialPickup;
+
+  if (
+    !boxesOverlap(getPlayerCollisionBox(), {
+      x: pickup.x,
+      y: pickup.y,
+      w: SPECIAL_PICKUP_SIZE,
+      h: SPECIAL_PICKUP_SIZE,
+    })
+  ) {
+    return;
+  }
+
+  room.specialPickupCollected = true;
+
+  if (pickup.specialId === "dash-boots" && hasDash) {
+    if (addToInventory({ type: "special", specialId: pickup.specialId }) !== null) {
+      showFloorMessage(`${SPECIAL_ITEMS[pickup.specialId].name} collected (spare pair).`);
+    }
+
+    return;
+  }
+
+  if (pickup.specialId === "dash-boots" && grantDash()) {
+    return;
+  }
+
+  if (addToInventory({ type: "special", specialId: pickup.specialId }) !== null) {
+    showFloorMessage(`${SPECIAL_ITEMS[pickup.specialId].name} collected — press 0 to use`);
   }
 }
 
@@ -2283,6 +2411,89 @@ function isNearSlotMachine() {
     },
     18,
   );
+}
+
+function tryPickupScrap() {
+  const room = getCurrentRoom();
+
+  if (!room.scrapPickups?.length) {
+    return;
+  }
+
+  for (let i = room.scrapPickups.length - 1; i >= 0; i--) {
+    const pickup = room.scrapPickups[i];
+
+    if (
+      boxesOverlap(getPlayerCollisionBox(), {
+        x: pickup.x,
+        y: pickup.y,
+        w: SCRAP_PICKUP_SIZE,
+        h: SCRAP_PICKUP_SIZE,
+      })
+    ) {
+      scrap += pickup.amount;
+      room.scrapPickups.splice(i, 1);
+      showFloorMessage(`+${pickup.amount} scrap`);
+    }
+  }
+}
+
+function tryPickupBossHeart() {
+  const room = getCurrentRoom();
+
+  if (!room.bossHeartPickup) {
+    return;
+  }
+
+  const heart = room.bossHeartPickup;
+
+  if (
+    boxesOverlap(getPlayerCollisionBox(), {
+      x: heart.x,
+      y: heart.y,
+      w: BOSS_HEART_SIZE,
+      h: BOSS_HEART_SIZE,
+    })
+  ) {
+    delete room.bossHeartPickup;
+    hp.max += BOSS_HEART_HP_BONUS;
+    hp.current += BOSS_HEART_HP_BONUS;
+
+    if (inventorySlotCount < INVENTORY_ABSOLUTE_MAX) {
+      inventorySlotCount += BOSS_INVENTORY_BONUS;
+      showFloorMessage(`Heart Container! +${BOSS_HEART_HP_BONUS} HP & +1 bag slot`);
+    } else {
+      showFloorMessage(`Heart Container! +${BOSS_HEART_HP_BONUS} max HP`);
+    }
+  }
+}
+
+function tryPickupBossWeapon() {
+  const room = getCurrentRoom();
+
+  if (!room.bossWeaponPickup) {
+    return;
+  }
+
+  const pickup = room.bossWeaponPickup;
+
+  if (
+    !boxesOverlap(getPlayerCollisionBox(), {
+      x: pickup.x,
+      y: pickup.y,
+      w: WEAPON_PICKUP_SIZE,
+      h: WEAPON_PICKUP_SIZE,
+    })
+  ) {
+    return;
+  }
+
+  const slot = addWeaponToInventory(pickup.weaponId);
+
+  if (slot !== null) {
+    showFloorMessage(`★ ${WEAPONS[pickup.weaponId].name} claimed!`);
+    delete room.bossWeaponPickup;
+  }
 }
 
 function tryUseSlotMachine() {
@@ -2352,13 +2563,13 @@ function tryOpenChest() {
 }
 
 function update() {
-  if (mapOpen || inventoryOpen) {
+  if (mapOpen || inventoryOpen || encyclopediaOpen || debugMenuOpen || itemDebugMenuOpen || stairsPrompt) {
     return;
   }
 
   const spinning = slotSpin.activeUntil > performance.now();
 
-  if (!spinning) {
+  if (!spinning && !shopOpen) {
     movePlayer();
     moveMobs();
     updateWeapon();
@@ -2374,6 +2585,10 @@ function update() {
     tryPickupWeapon();
     tryPickupPotion();
     tryPickupVoidShard();
+    tryPickupScrap();
+    tryPickupBossHeart();
+    tryPickupBossWeapon();
+    tryPickupSpecial();
     tryOpenChest();
   }
 
@@ -2386,8 +2601,9 @@ function updateHtmlHud() {
   hudScoreEl.textContent = String(score);
   hudDepthEl.textContent = String(currentDepth);
   hudRoomEl.textContent = room.name;
-  hudItemsEl.textContent = `${countInventoryItems()}/${MAX_INVENTORY_SIZE} items`;
+  hudItemsEl.textContent = `${countInventoryItems()}/${inventorySlotCount} items`;
   hudShardsEl.textContent = `${voidShards} shard${voidShards === 1 ? "" : "s"}`;
+  hudScrapEl.textContent = `${scrap} scrap · ${getArmorLabel(armorTier)}${hasDash ? " · Dash ready" : ""}`;
 
   const hpRatio = hp.current / hp.max;
   hudHpFillEl.style.width = `${Math.max(0, Math.min(1, hpRatio)) * 100}%`;
@@ -2752,7 +2968,63 @@ function getPlayerSprite() {
   }
 }
 
+function drawPlayer() {
+  const playerSprite = getPlayerSprite();
+  const invincible = isPlayerInvincible();
+  const showPlayer = !invincible || Math.floor(performance.now() / 100) % 2 === 0;
+
+  if (!showPlayer) {
+    return;
+  }
+
+  if (invincible) {
+    drawTintedSprite(ctx, playerSprite, player.x, player.y, player.size, "#ff6666", 0.55);
+  } else {
+    drawSprite(ctx, playerSprite, player.x, player.y, player.size, player.size);
+  }
+
+  if (armorTier !== "none") {
+    const visual = ARMOR_VISUAL[armorTier];
+    drawTintedSprite(
+      ctx,
+      playerSprite,
+      player.x,
+      player.y,
+      player.size,
+      visual.tint,
+      visual.alpha,
+    );
+
+    const cx = player.x + player.size / 2;
+    const cy = player.y + player.size / 2;
+    ctx.fillStyle = visual.accent;
+    ctx.globalAlpha = 0.75;
+
+    if (playerFacing === "north" || playerFacing === "south") {
+      ctx.fillRect(cx - 14, cy - 6, 28, 10);
+      ctx.fillRect(cx - 18, cy - 14, 8, 8);
+      ctx.fillRect(cx + 10, cy - 14, 8, 8);
+    } else {
+      ctx.fillRect(cx - 10, cy - 4, 20, 12);
+      ctx.fillRect(cx - 20, cy - 10, 8, 8);
+      ctx.fillRect(cx + 12, cy - 10, 8, 8);
+    }
+
+    ctx.globalAlpha = 1;
+  }
+
+  if (performance.now() < dashActiveUntil) {
+    ctx.strokeStyle = "rgba(120, 200, 255, 0.8)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(player.x + 2, player.y + 2, player.size - 4, player.size - 4);
+  }
+}
+
 function getMobSprite(mob: RuntimeMob, segmentIndex: number) {
+  if (mob.type === "boss") {
+    return SPRITES.brute;
+  }
+
   if (mob.type === "snake") {
     return segmentIndex === 0 ? SPRITES.snakeHead : SPRITES.snakeBody;
   }
@@ -2865,7 +3137,8 @@ function drawChest() {
   const sprite = room.chest.opened ? SPRITES.chestOpen : SPRITES.chestClosed;
 
   if (!room.chest.opened) {
-    ctx.fillStyle = "rgba(255, 215, 0, 0.15)";
+    const isSlotChest = room.chest.variant === "slot";
+    ctx.fillStyle = isSlotChest ? "rgba(180, 80, 255, 0.28)" : "rgba(255, 215, 0, 0.15)";
     ctx.beginPath();
     ctx.arc(
       screenX + CHEST_SIZE / 2,
@@ -2877,7 +3150,11 @@ function drawChest() {
     ctx.fill();
   }
 
-  drawSprite(ctx, sprite, screenX, screenY + pulse, CHEST_SIZE, CHEST_SIZE);
+  if (room.chest.variant === "slot" && !room.chest.opened) {
+    drawTintedSprite(ctx, sprite, screenX, screenY + pulse, CHEST_SIZE, "#c070ff", 0.45);
+  } else {
+    drawSprite(ctx, sprite, screenX, screenY + pulse, CHEST_SIZE, CHEST_SIZE);
+  }
 }
 
 function drawVoidShardPickup() {
@@ -2913,6 +3190,114 @@ function drawVoidShardPickup() {
   );
 }
 
+function drawScrapPickups() {
+  const room = getCurrentRoom();
+
+  if (!room.scrapPickups?.length) {
+    return;
+  }
+
+  for (const pickup of room.scrapPickups) {
+    const pulse = Math.sin(performance.now() / 240 + pickup.x) * 2;
+
+    ctx.fillStyle = "rgba(160, 160, 170, 0.25)";
+    ctx.beginPath();
+    ctx.arc(
+      pickup.x + SCRAP_PICKUP_SIZE / 2,
+      pickup.y + SCRAP_PICKUP_SIZE / 2 + pulse,
+      SCRAP_PICKUP_SIZE * 0.55,
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+
+    ctx.fillStyle = "#b8bcc8";
+    ctx.fillRect(pickup.x + 6, pickup.y + 8 + pulse, SCRAP_PICKUP_SIZE - 12, SCRAP_PICKUP_SIZE - 14);
+    ctx.fillStyle = "#8a90a0";
+    ctx.fillRect(pickup.x + 9, pickup.y + 11 + pulse, SCRAP_PICKUP_SIZE - 18, 4);
+
+    ctx.fillStyle = "#e8ecf4";
+    ctx.font = "bold 10px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText(String(pickup.amount), pickup.x + SCRAP_PICKUP_SIZE / 2, pickup.y + SCRAP_PICKUP_SIZE + 10);
+    ctx.textAlign = "left";
+  }
+}
+
+function drawBossHeartPickup() {
+  const room = getCurrentRoom();
+
+  if (!room.bossHeartPickup) {
+    return;
+  }
+
+  const heart = room.bossHeartPickup;
+  const pulse = Math.sin(performance.now() / 200) * 3;
+
+  ctx.fillStyle = "rgba(255, 64, 96, 0.28)";
+  ctx.beginPath();
+  ctx.arc(
+    heart.x + BOSS_HEART_SIZE / 2,
+    heart.y + BOSS_HEART_SIZE / 2 + pulse,
+    BOSS_HEART_SIZE * 0.75,
+    0,
+    Math.PI * 2,
+  );
+  ctx.fill();
+
+  ctx.fillStyle = "#ff4466";
+  ctx.beginPath();
+  ctx.arc(heart.x + BOSS_HEART_SIZE / 2, heart.y + BOSS_HEART_SIZE / 2 + pulse, 10, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = "#ffd0d8";
+  ctx.font = "bold 10px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText("♥ +Max HP", heart.x + BOSS_HEART_SIZE / 2, heart.y - 6 + pulse);
+  ctx.textAlign = "left";
+}
+
+function drawShopStation() {
+  const room = getCurrentRoom();
+
+  if (!room.shop) {
+    return;
+  }
+
+  const screenX = room.shop.x;
+  const screenY = room.shop.y;
+  const pulse = Math.sin(performance.now() / 300) * 2;
+
+  ctx.fillStyle = "rgba(80, 200, 120, 0.18)";
+  ctx.beginPath();
+  ctx.arc(
+    screenX + SHOP_STATION_SIZE / 2,
+    screenY + SHOP_STATION_SIZE / 2 + pulse,
+    SHOP_STATION_SIZE * 0.62,
+    0,
+    Math.PI * 2,
+  );
+  ctx.fill();
+
+  drawTintedSprite(
+    ctx,
+    SPRITES.chestClosed,
+    screenX + 6,
+    screenY + 8 + pulse,
+    SHOP_STATION_SIZE - 12,
+    "#5cd68a",
+    0.35,
+  );
+
+  if (isNearShopStation(room, getPlayerCollisionBox())) {
+    ctx.fillStyle = "#b8f0c8";
+    ctx.font = "bold 11px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText("E — Shop & Craft", screenX + SHOP_STATION_SIZE / 2, screenY - 8 + pulse);
+    ctx.textAlign = "left";
+  }
+}
+
 function drawSlotMachine() {
   const room = getCurrentRoom();
 
@@ -2924,28 +3309,29 @@ function drawSlotMachine() {
   const screenY = room.slotMachine.y;
   const pulse = Math.sin(performance.now() / 340) * 2;
 
-  ctx.fillStyle = "rgba(255, 168, 48, 0.12)";
+  ctx.fillStyle = "rgba(160, 72, 255, 0.22)";
   ctx.beginPath();
   ctx.arc(
     screenX + SLOT_MACHINE_SIZE / 2,
     screenY + SLOT_MACHINE_SIZE / 2 + pulse,
-    SLOT_MACHINE_SIZE * 0.62,
+    SLOT_MACHINE_SIZE * 0.68,
     0,
     Math.PI * 2,
   );
   ctx.fill();
 
-  drawSprite(
+  drawTintedSprite(
     ctx,
     SPRITES.slotMachine,
     screenX,
     screenY + pulse,
     SLOT_MACHINE_SIZE,
-    SLOT_MACHINE_SIZE,
+    "#c070ff",
+    0.4,
   );
 
   if (isNearSlotMachine() && slotSpin.activeUntil <= performance.now()) {
-    ctx.fillStyle = voidShards > 0 ? "#e8d8a0" : "#9a8878";
+    ctx.fillStyle = voidShards > 0 ? "#e8c8ff" : "#9a8878";
     ctx.font = "bold 11px Arial";
     ctx.textAlign = "center";
     ctx.fillText(
@@ -3102,6 +3488,15 @@ function drawInventoryItem(
     ctx.fillText(def.name, centerX, slotY + slotSize - 20);
     ctx.fillStyle = dur > maxDur * 0.25 ? "#ccc" : "#f88";
     ctx.fillText(`${dur}/${maxDur}`, centerX, slotY + slotSize - 8);
+  } else if (item.type === "special" && item.specialId) {
+    drawSprite(ctx, SPRITES.dashBoots, slotX + 16, slotY + 16, iconSize, iconSize);
+    const def = SPECIAL_ITEMS[item.specialId];
+    ctx.fillStyle = "#88ddff";
+    ctx.font = "9px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText(def.name, centerX, slotY + slotSize - 20);
+    ctx.fillStyle = "#aaa";
+    ctx.fillText("Press 0", centerX, slotY + slotSize - 8);
   }
 
   ctx.globalAlpha = 1;
@@ -3130,12 +3525,12 @@ function drawInventoryOverlay() {
   ctx.font = "14px Arial";
   ctx.fillStyle = "#aaa";
   ctx.fillText(
-    `${countInventoryItems()}/${MAX_INVENTORY_SIZE} slots · drag to rearrange · 3–8 active weapon`,
+    `${countInventoryItems()}/${inventorySlotCount} slots · drag to rearrange · right-click or drag out to discard`,
     panelX + panelWidth / 2,
     panelY + 54,
   );
 
-  for (let i = 0; i < MAX_INVENTORY_SIZE; i++) {
+  for (let i = 0; i < inventorySlotCount; i++) {
     const { x: slotX, y: slotY } = getInventorySlotRect(i);
     const item = inventory[i];
     const isActiveWeapon = i === activeWeaponSlot && item?.type === "weapon";
@@ -3194,12 +3589,27 @@ function drawInventoryOverlay() {
   ctx.textAlign = "center";
   ctx.fillStyle = "#888";
   ctx.font = "13px Arial";
-  ctx.fillText("Press I or Inv to close", panelX + panelWidth / 2, panelY + panelHeight - 16);
+  ctx.fillText("Press I to close · Del to discard hovered item", panelX + panelWidth / 2, panelY + panelHeight - 16);
   ctx.textAlign = "left";
 }
 
 function handleCanvasMouseDown(event: MouseEvent) {
   if (state !== "playing") {
+    return;
+  }
+
+  if (itemDebugMenuOpen) {
+    if (event.button !== 0) {
+      return;
+    }
+
+    const pos = getCanvasMousePos(event);
+    const slot = getItemDebugSlotAt(pos.x, pos.y);
+
+    if (slot !== null) {
+      grantDebugItem(DEBUG_ITEM_CATALOG[slot]);
+    }
+
     return;
   }
 
@@ -3219,9 +3629,21 @@ function handleInventoryMouseDown(event: MouseEvent) {
   }
 
   const pos = getCanvasMousePos(event);
+  inventoryHoverX = pos.x;
+  inventoryHoverY = pos.y;
   const slot = getInventorySlotAt(pos.x, pos.y);
 
   if (slot === null || !inventory[slot]) {
+    return;
+  }
+
+  if (event.button === 2) {
+    event.preventDefault();
+    discardInventoryItem(slot);
+    return;
+  }
+
+  if (event.button !== 0) {
     return;
   }
 
@@ -3237,11 +3659,25 @@ function handleInventoryMouseDown(event: MouseEvent) {
 }
 
 function handleInventoryMouseMove(event: MouseEvent) {
+  if (itemDebugMenuOpen) {
+    const pos = getCanvasMousePos(event);
+    itemDebugHoverIndex = getItemDebugSlotAt(pos.x, pos.y) ?? -1;
+    return;
+  }
+
   if (!inventoryOpen || !inventoryDrag.pointerDown) {
+    if (inventoryOpen) {
+      const pos = getCanvasMousePos(event);
+      inventoryHoverX = pos.x;
+      inventoryHoverY = pos.y;
+    }
+
     return;
   }
 
   const pos = getCanvasMousePos(event);
+  inventoryHoverX = pos.x;
+  inventoryHoverY = pos.y;
   inventoryDrag.x = pos.x;
   inventoryDrag.y = pos.y;
 
@@ -3270,6 +3706,8 @@ function handleInventoryMouseUp(event: MouseEvent) {
 
     if (toSlot !== null) {
       moveInventoryItem(fromSlot, toSlot);
+    } else if (!isPointInInventoryPanel(pos.x, pos.y)) {
+      discardInventoryItem(fromSlot);
     }
   } else if (inventory[fromSlot]?.type === "weapon") {
     selectWeaponSlot(fromSlot);
@@ -3390,6 +3828,377 @@ function drawWeaponSwing() {
   ctx.restore();
 }
 
+function drawShopOverlay() {
+  if (!shopOpen) {
+    return;
+  }
+
+  const panelW = 420;
+  const panelH = 320;
+  const panelX = (PLAY_WIDTH - panelW) / 2;
+  const panelY = (PLAY_HEIGHT - panelH) / 2;
+  const nextArmor = getNextArmorTier(armorTier);
+
+  ctx.fillStyle = "rgba(0, 0, 0, 0.72)";
+  ctx.fillRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+
+  ctx.fillStyle = "#1a2018";
+  ctx.fillRect(panelX, panelY, panelW, panelH);
+  ctx.strokeStyle = "#5cd68a";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(panelX + 1, panelY + 1, panelW - 2, panelH - 2);
+
+  ctx.fillStyle = "#d8f0dc";
+  ctx.font = "bold 20px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText("Coin Shop & Forge", panelX + panelW / 2, panelY + 32);
+
+  ctx.font = "14px Arial";
+  ctx.fillStyle = "#b8d8bc";
+  ctx.fillText(`Coins: ${score} · Scrap: ${scrap} · Armor: ${getArmorLabel(armorTier)}`, panelX + panelW / 2, panelY + 56);
+
+  const lines = [
+    `Q — Health Potion (${SHOP_ITEMS.healthPotion.cost} coins)`,
+    `W — Strong Potion (${SHOP_ITEMS.strongPotion.cost} coins)`,
+    `R — Repair Weapon (${SHOP_ITEMS.weaponRepair.cost} coins)`,
+    nextArmor
+      ? `T — Craft ${ARMOR_TIERS[nextArmor].label} (${ARMOR_TIERS[nextArmor].scrapCost} scrap)`
+      : "T — Max armor reached",
+    hasDash
+      ? "U — Dash Boots (already equipped)"
+      : `U — Dash Boots (${SPECIAL_ITEMS["dash-boots"].shopCost} coins)`,
+    "E / Esc — Close",
+  ];
+
+  ctx.textAlign = "left";
+  ctx.fillStyle = "#e8f4ea";
+
+  for (let i = 0; i < lines.length; i++) {
+    ctx.fillText(lines[i], panelX + 28, panelY + 96 + i * 28);
+  }
+
+  ctx.textAlign = "left";
+}
+
+function drawEncyclopediaOverlay() {
+  if (!encyclopediaOpen) {
+    return;
+  }
+
+  const panelW = 520;
+  const panelH = 360;
+  const panelX = (PLAY_WIDTH - panelW) / 2;
+  const panelY = (PLAY_HEIGHT - panelH) / 2;
+  const entryHeight = 78;
+  const listTop = panelY + 72;
+  const listHeight = panelH - 96;
+
+  ctx.fillStyle = "rgba(0, 0, 0, 0.72)";
+  ctx.fillRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+
+  ctx.fillStyle = "#18141c";
+  ctx.fillRect(panelX, panelY, panelW, panelH);
+  ctx.strokeStyle = "#c8a050";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(panelX + 1, panelY + 1, panelW - 2, panelH - 2);
+
+  ctx.fillStyle = "#f0e6c8";
+  ctx.font = "bold 20px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText("Weapon Encyclopedia", panelX + panelW / 2, panelY + 32);
+  ctx.font = "13px Arial";
+  ctx.fillStyle = "#c8b890";
+  ctx.fillText(
+    `${getDiscoveredWeapons().length} / ${ALL_WEAPON_IDS.length} discovered · scroll wheel`,
+    panelX + panelW / 2,
+    panelY + 54,
+  );
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(panelX + 12, listTop, panelW - 24, listHeight);
+  ctx.clip();
+
+  for (let i = 0; i < ALL_WEAPON_IDS.length; i++) {
+    const weaponId = ALL_WEAPON_IDS[i];
+    const y = listTop + i * entryHeight - encyclopediaScroll;
+    const discovered = isWeaponDiscovered(weaponId);
+
+    if (y + entryHeight < listTop || y > listTop + listHeight) {
+      continue;
+    }
+
+    ctx.fillStyle = i % 2 === 0 ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.06)";
+    ctx.fillRect(panelX + 16, y, panelW - 32, entryHeight - 6);
+
+    if (discovered) {
+      const def = WEAPONS[weaponId];
+      const prefix = def.rarity === "legendary" ? "★ " : "";
+
+      drawSprite(
+        ctx,
+        getWeaponSprite(weaponId),
+        panelX + 24,
+        y + 12,
+        44,
+        44,
+      );
+
+      ctx.textAlign = "left";
+      ctx.fillStyle = def.rarity === "legendary" ? "#e8c8ff" : "#e8e0d0";
+      ctx.font = "bold 15px Arial";
+      ctx.fillText(`${prefix}${def.name}`, panelX + 80, y + 28);
+      ctx.font = "12px Arial";
+      ctx.fillStyle = "#b8a890";
+      ctx.fillText(
+        `${def.damage} dmg · ${def.maxDurability} dur · ${def.cooldownMs}ms cd`,
+        panelX + 80,
+        y + 46,
+      );
+      ctx.fillStyle = def.rarity === "legendary" ? "#c8a0ff" : "#8a8070";
+      ctx.fillText(getWeaponAbilityDescription(weaponId), panelX + 80, y + 62);
+    } else {
+      ctx.fillStyle = "#3a3540";
+      ctx.fillRect(panelX + 24, y + 12, 44, 44);
+      ctx.textAlign = "left";
+      ctx.fillStyle = "#6a6470";
+      ctx.font = "bold 15px Arial";
+      ctx.fillText("???", panelX + 80, y + 36);
+      ctx.font = "12px Arial";
+      ctx.fillText("Not yet discovered", panelX + 80, y + 56);
+    }
+  }
+
+  ctx.restore();
+
+  ctx.fillStyle = "#9a9080";
+  ctx.font = "12px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText("K / Esc — Close · Mouse wheel to scroll", panelX + panelW / 2, panelY + panelH - 14);
+  ctx.textAlign = "left";
+}
+
+function drawDebugCatalogItem(entry: DebugGrantEntry, slotX: number, slotY: number, slotSize: number) {
+  const iconSize = 40;
+  const centerX = slotX + slotSize / 2;
+
+  if (entry.kind === "weapon") {
+    const def = WEAPONS[entry.weaponId];
+    drawSprite(ctx, getWeaponSprite(entry.weaponId), slotX + 16, slotY + 16, iconSize, iconSize);
+    ctx.fillStyle = def.rarity === "legendary" ? "#ffd860" : "#fff";
+    ctx.font = "9px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText(def.name, centerX, slotY + slotSize - 8);
+  } else if (entry.kind === "health-potion") {
+    drawSprite(ctx, SPRITES.potionHealth, slotX + 16, slotY + 18, iconSize, iconSize);
+    ctx.fillStyle = "#ddd";
+    ctx.font = "9px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText(`HP +${entry.healAmount}`, centerX, slotY + slotSize - 8);
+  } else if (entry.kind === "strong-potion") {
+    drawSprite(ctx, SPRITES.potionStrong, slotX + 16, slotY + 18, iconSize, iconSize);
+    ctx.fillStyle = "#ddd";
+    ctx.font = "9px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText(`HP +${entry.healAmount}`, centerX, slotY + slotSize - 8);
+  } else if (entry.kind === "special") {
+    drawSprite(ctx, SPRITES.dashBoots, slotX + 16, slotY + 16, iconSize, iconSize);
+    ctx.fillStyle = "#88ddff";
+    ctx.font = "9px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText(SPECIAL_ITEMS[entry.specialId].name, centerX, slotY + slotSize - 8);
+  }
+
+  ctx.textAlign = "left";
+}
+
+function drawItemDebugOverlay() {
+  if (!itemDebugMenuOpen) {
+    return;
+  }
+
+  const { panelX, panelY, panelWidth, panelHeight, slotSize } = ITEM_DEBUG_UI;
+
+  ctx.fillStyle = "rgba(0, 0, 0, 0.84)";
+  ctx.fillRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+
+  ctx.fillStyle = "#141820";
+  ctx.fillRect(panelX, panelY, panelWidth, panelHeight);
+  ctx.strokeStyle = "#66aaff";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(panelX + 1, panelY + 1, panelWidth - 2, panelHeight - 2);
+
+  ctx.fillStyle = "#d8e8ff";
+  ctx.font = "bold 22px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText("Item Debug Spawner", panelX + panelWidth / 2, panelY + 32);
+
+  ctx.font = "13px Arial";
+  ctx.fillStyle = "#9ab0c8";
+  ctx.fillText("Click an item to add it to your inventory", panelX + panelWidth / 2, panelY + 54);
+
+  for (let i = 0; i < DEBUG_ITEM_CATALOG.length; i++) {
+    const { x: slotX, y: slotY } = getItemDebugSlotRect(i);
+    const isHovered = itemDebugHoverIndex === i;
+
+    ctx.fillStyle = isHovered ? "#2a3848" : "#1e2430";
+    ctx.fillRect(slotX, slotY, slotSize, slotSize);
+    ctx.strokeStyle = isHovered ? "#88ccff" : "#445566";
+    ctx.lineWidth = isHovered ? 3 : 1;
+    ctx.strokeRect(slotX, slotY, slotSize, slotSize);
+
+    drawDebugCatalogItem(DEBUG_ITEM_CATALOG[i], slotX, slotY, slotSize);
+  }
+
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#888";
+  ctx.font = "13px Arial";
+  ctx.fillText("F5 / Esc — Close", panelX + panelWidth / 2, panelY + panelHeight - 14);
+  ctx.textAlign = "left";
+}
+
+function drawDebugMenuOverlay() {
+  if (!debugMenuOpen) {
+    return;
+  }
+
+  const panelW = 420;
+  const panelH = 364;
+  const panelX = (PLAY_WIDTH - panelW) / 2;
+  const panelY = (PLAY_HEIGHT - panelH) / 2;
+
+  ctx.fillStyle = "rgba(0, 0, 0, 0.78)";
+  ctx.fillRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+
+  ctx.fillStyle = "#141820";
+  ctx.fillRect(panelX, panelY, panelW, panelH);
+  ctx.strokeStyle = debugGodMode ? "#66ff88" : "#6688ff";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(panelX + 1, panelY + 1, panelW - 2, panelH - 2);
+
+  ctx.fillStyle = "#d8e0ff";
+  ctx.font = "bold 20px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText("Debug Menu (F4)", panelX + panelW / 2, panelY + 30);
+
+  const lines = [
+    `G — God mode ${debugGodMode ? "[ON]" : "[off]"}`,
+    `K — Instakill ${debugInstakill ? "[ON]" : "[off]"}`,
+    "H — Full heal",
+    "C — +50 coins",
+    "S — +10 scrap",
+    "W — Add random weapon to bag",
+    "P — Spawn legendary pickup nearby",
+    "T — Teleport to stairs room",
+    "N — Teleport to linked room",
+    "D — Descend one floor",
+    "I — Item spawner (click to grant items)",
+    "F4 / Esc — Close",
+  ];
+
+  ctx.textAlign = "left";
+  ctx.font = "14px Arial";
+  ctx.fillStyle = "#c8d0e8";
+
+  for (let i = 0; i < lines.length; i++) {
+    ctx.fillText(lines[i], panelX + 24, panelY + 64 + i * 24);
+  }
+
+  ctx.textAlign = "left";
+}
+
+function drawBossWeaponPickup() {
+  const room = getCurrentRoom();
+
+  if (!room.bossWeaponPickup) {
+    return;
+  }
+
+  const pickup = room.bossWeaponPickup;
+  const pulse = Math.sin(performance.now() / 220) * 3;
+  const size = WEAPON_PICKUP_SIZE;
+
+  ctx.fillStyle = "rgba(180, 120, 255, 0.28)";
+  ctx.beginPath();
+  ctx.arc(pickup.x + size / 2, pickup.y + size / 2 + pulse, size * 0.62, 0, Math.PI * 2);
+  ctx.fill();
+
+  drawSprite(
+    ctx,
+    getWeaponSprite(pickup.weaponId),
+    pickup.x + 4,
+    pickup.y + 4 + pulse,
+    size - 8,
+    size - 8,
+  );
+
+  ctx.fillStyle = "#e8c8ff";
+  ctx.font = "bold 10px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText(`★ ${WEAPONS[pickup.weaponId].name}`, pickup.x + size / 2, pickup.y - 6 + pulse);
+  ctx.textAlign = "left";
+}
+
+function drawSpecialPickup() {
+  const room = getCurrentRoom();
+
+  if (!room.specialPickup || room.specialPickupCollected) {
+    return;
+  }
+
+  const pickup = room.specialPickup;
+  const pulse = Math.sin(performance.now() / 180) * 3;
+  const size = SPECIAL_PICKUP_SIZE;
+
+  ctx.fillStyle = "rgba(80, 180, 255, 0.25)";
+  ctx.beginPath();
+  ctx.arc(pickup.x + size / 2, pickup.y + size / 2 + pulse, size * 0.55, 0, Math.PI * 2);
+  ctx.fill();
+
+  drawSprite(ctx, SPRITES.dashBoots, pickup.x + 4, pickup.y + 4 + pulse, size - 8, size - 8);
+
+  ctx.fillStyle = "#a8e8ff";
+  ctx.font = "bold 10px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText(
+    SPECIAL_ITEMS[pickup.specialId].name,
+    pickup.x + size / 2,
+    pickup.y - 6 + pulse,
+  );
+  ctx.textAlign = "left";
+}
+
+function drawStairsPrompt() {
+  if (!stairsPrompt) {
+    return;
+  }
+
+  const panelW = 360;
+  const panelH = 120;
+  const panelX = (PLAY_WIDTH - panelW) / 2;
+  const panelY = PLAY_HEIGHT / 2 - panelH / 2;
+  const label = stairsPrompt === "down" ? "Descend to the next floor?" : "Ascend to the previous floor?";
+
+  ctx.fillStyle = "rgba(0, 0, 0, 0.78)";
+  ctx.fillRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+
+  ctx.fillStyle = "#1a1820";
+  ctx.fillRect(panelX, panelY, panelW, panelH);
+  ctx.strokeStyle = "#d8b060";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(panelX + 1, panelY + 1, panelW - 2, panelH - 2);
+
+  ctx.fillStyle = "#f0e8d0";
+  ctx.font = "bold 18px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText(label, panelX + panelW / 2, panelY + 42);
+
+  ctx.font = "14px Arial";
+  ctx.fillStyle = "#c8c0b0";
+  ctx.fillText("Y / E — Yes     N / Esc — Stay", panelX + panelW / 2, panelY + 78);
+  ctx.textAlign = "left";
+}
+
 function draw() {
   const room = getCurrentRoom();
 
@@ -3406,28 +4215,14 @@ function draw() {
   drawPotionPickup();
   drawChest();
   drawVoidShardPickup();
+  drawShopStation();
   drawSlotMachine();
+  drawScrapPickups();
+  drawBossHeartPickup();
+  drawBossWeaponPickup();
+  drawSpecialPickup();
 
-  const invincible = isPlayerInvincible();
-  const showPlayer = !invincible || Math.floor(performance.now() / 100) % 2 === 0;
-
-  if (showPlayer) {
-    const playerSprite = getPlayerSprite();
-
-    if (invincible) {
-      drawTintedSprite(
-        ctx,
-        playerSprite,
-        player.x,
-        player.y,
-        player.size,
-        "#ff6666",
-        0.55,
-      );
-    } else {
-      drawSprite(ctx, playerSprite, player.x, player.y, player.size, player.size);
-    }
-  }
+  drawPlayer();
 
   drawWeaponSwing();
 
@@ -3437,6 +4232,12 @@ function draw() {
 
   for (const mob of activeMobs) {
     if (isMobAlive(mob)) {
+      if (mob.type === "boss" && mob.golemState && areGolemSpritesLoaded()) {
+        drawGolemBoss(ctx, mob, mob.golemState, performance.now() < mob.hitFlashUntil);
+        drawMobHpBar(mob);
+        continue;
+      }
+
       const colors = MOB_COLORS[mob.type];
       const hit = performance.now() < mob.hitFlashUntil;
 
@@ -3454,6 +4255,10 @@ function draw() {
     }
   }
 
+  if (areGolemSpritesLoaded()) {
+    drawGolemEffects(ctx);
+  }
+
   drawFloorMessage();
   updateHtmlHud();
   drawTileDebugOverlay(ctx, tileInspection, debugMode, PLAY_WIDTH);
@@ -3468,6 +4273,26 @@ function draw() {
 
   if (slotSpin.activeUntil > performance.now()) {
     drawSlotSpinOverlay();
+  }
+
+  if (shopOpen) {
+    drawShopOverlay();
+  }
+
+  if (encyclopediaOpen) {
+    drawEncyclopediaOverlay();
+  }
+
+  if (debugMenuOpen) {
+    drawDebugMenuOverlay();
+  }
+
+  if (itemDebugMenuOpen) {
+    drawItemDebugOverlay();
+  }
+
+  if (stairsPrompt) {
+    drawStairsPrompt();
   }
 }
 
@@ -3534,16 +4359,34 @@ playBtn.addEventListener("click", startGame);
 menuBtn.addEventListener("click", showMenu);
 helpBtn.addEventListener("click", () => setMenuHelpOpen(true));
 helpCloseBtn.addEventListener("click", () => setMenuHelpOpen(false));
+leaderboardBtn.addEventListener("click", () => setMenuLeaderboardOpen(true));
+leaderboardCloseBtn.addEventListener("click", () => setMenuLeaderboardOpen(false));
 mapBtn.addEventListener("click", toggleMap);
 invBtn.addEventListener("click", toggleInventory);
 canvas.addEventListener("mousedown", handleCanvasMouseDown);
+canvas.addEventListener("contextmenu", (event) => {
+  if (inventoryOpen && state === "playing") {
+    event.preventDefault();
+  }
+});
 canvas.addEventListener("mousemove", handleInventoryMouseMove);
 window.addEventListener("mouseup", handleInventoryMouseUp);
 canvas.addEventListener("mouseleave", handleInventoryMouseLeave);
+canvas.addEventListener(
+  "wheel",
+  (event) => {
+    if (encyclopediaOpen && state === "playing") {
+      event.preventDefault();
+      toggleEncyclopediaScroll(event.deltaY);
+    }
+  },
+  { passive: false },
+);
 
 let spritesReady = false;
 
 loadAssetSprites()
+  .then(() => loadGolemSprites())
   .then(() => {
     spritesReady = true;
     drawMenuArt();

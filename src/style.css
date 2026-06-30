@@ -8,6 +8,105 @@ body {
   font-family: Arial, sans-serif;
 }
 
+.hidden {
+  display: none !important;
+}
+
 canvas {
   border: 2px solid white;
+}
+
+.menu {
+  width: 800px;
+  height: 500px;
+  border: 2px solid white;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+.menu-content {
+  text-align: center;
+  color: white;
+  padding: 2rem;
+}
+
+.menu-title {
+  margin: 0 0 0.5rem;
+  font-size: 3.5rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: gold;
+  text-shadow: 0 0 20px rgba(255, 215, 0, 0.4);
+}
+
+.menu-tagline {
+  margin: 0 0 2rem;
+  font-size: 1.1rem;
+  color: #ccc;
+}
+
+.menu-coin {
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 2rem;
+  background: gold;
+  border-radius: 4px;
+  box-shadow: 0 0 24px rgba(255, 215, 0, 0.6);
+  animation: coin-bob 1.5s ease-in-out infinite;
+}
+
+@keyframes coin-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+.menu-btn {
+  display: block;
+  margin: 0 auto 1.5rem;
+  padding: 0.85rem 3rem;
+  font-size: 1.25rem;
+  font-weight: bold;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #000;
+  background: cyan;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.menu-btn:hover {
+  transform: scale(1.05);
+  box-shadow: 0 0 20px rgba(0, 255, 255, 0.5);
+}
+
+.menu-btn:active {
+  transform: scale(0.98);
+}
+
+.menu-controls {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #888;
+}
+
+.menu-controls kbd {
+  display: inline-block;
+  padding: 0.15rem 0.45rem;
+  font-family: inherit;
+  font-size: 0.85rem;
+  color: #ddd;
+  background: #222;
+  border: 1px solid #444;
+  border-radius: 4px;
 }

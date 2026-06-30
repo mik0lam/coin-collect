@@ -1,3 +1,13 @@
+import "./style.css";
+
+function required<T>(value: T | null | undefined, name: string): T {
+  if (value == null) {
+    throw new Error(`${name} not found`);
+  }
+
+  return value;
+}
+
 const app = document.querySelector<HTMLDivElement>("#app");
 
 if (!app) {
@@ -5,20 +15,29 @@ if (!app) {
 }
 
 app.innerHTML = `
-  <canvas id="game" width="800" height="500"></canvas>
+  <div id="menu" class="menu">
+    <div class="menu-content">
+      <h1 class="menu-title">Coin Collect</h1>
+      <p class="menu-tagline">Grab the gold. Dodge the snake.</p>
+      <div class="menu-coin" aria-hidden="true"></div>
+      <button id="play-btn" class="menu-btn" type="button">Play</button>
+      <p class="menu-controls">Move with <kbd>WASD</kbd> or <kbd>Arrow keys</kbd></p>
+    </div>
+  </div>
+  <canvas id="game" class="hidden" width="800" height="500"></canvas>
 `;
 
-const canvas = document.querySelector<HTMLCanvasElement>("#game");
+const menuEl = required(document.querySelector<HTMLDivElement>("#menu"), "Menu");
+const playBtn = required(
+  document.querySelector<HTMLButtonElement>("#play-btn"),
+  "Play button",
+);
+const canvas = required(document.querySelector<HTMLCanvasElement>("#game"), "Canvas");
+const ctx = required(canvas.getContext("2d"), "Canvas context");
 
-if (!canvas) {
-  throw new Error("Canvas element not found");
-}
+type GameState = "menu" | "playing";
 
-const ctx = canvas.getContext("2d");
-
-if (!ctx) {
-  throw new Error("Canvas context not found");
-}
+let state: GameState = "menu";
 
 const player = {
   x: 100,
@@ -33,13 +52,15 @@ const coin = {
   size: 20,
 };
 
+const initialSnakeSegments = [
+  { x: 650, y: 400 },
+  { x: 680, y: 400 },
+  { x: 710, y: 400 },
+  { x: 740, y: 400 },
+];
+
 const snake = {
-  segments: [
-    { x: 650, y: 400 },
-    { x: 680, y: 400 },
-    { x: 710, y: 400 },
-    { x: 740, y: 400 },
-  ],
+  segments: initialSnakeSegments.map((segment) => ({ ...segment })),
   size: 24,
   speed: 2,
 };
@@ -55,6 +76,25 @@ window.addEventListener("keydown", (event) => {
 window.addEventListener("keyup", (event) => {
   keys.delete(event.key.toLowerCase());
 });
+
+function resetGame() {
+  score = 0;
+  player.x = 100;
+  player.y = 100;
+  coin.x = 300;
+  coin.y = 200;
+  snake.segments = initialSnakeSegments.map((segment) => ({ ...segment }));
+  keys.clear();
+}
+
+function startGame() {
+  state = "playing";
+  resetGame();
+
+  menuEl.classList.add("hidden");
+  canvas.classList.remove("hidden");
+  gameLoop();
+}
 
 function movePlayer() {
   if (keys.has("w") || keys.has("arrowup")) {
@@ -154,9 +194,13 @@ function draw() {
 }
 
 function gameLoop() {
+  if (state !== "playing") {
+    return;
+  }
+
   update();
   draw();
   requestAnimationFrame(gameLoop);
 }
 
-gameLoop();
+playBtn.addEventListener("click", startGame);

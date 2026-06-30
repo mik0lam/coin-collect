@@ -9,7 +9,7 @@ A browser-based dungeon crawler built with TypeScript and Vite. Explore procedur
 | Move | `WASD` or `Arrow keys` |
 | Attack | `Space` |
 | Map | `M` or **Map** button |
-| Inventory | `I` or **Inv** button — `1` health potion, `2` strong potion |
+| Inventory | `I` or **Inv** — `1`/`2` potions · `3`–`8` select active weapon slot |
 
 ### Goal
 
@@ -34,7 +34,7 @@ A browser-based dungeon crawler built with TypeScript and Vite. Explore procedur
 - **Map** — press `M` or click **Map** to see only rooms you have explored on the current floor
 - **Potions & inventory** — purple potions on the floor restore HP; collect up to 6 and drink with `1` (health) or `2` (strong)
 - **Mobs** — snakes, slimes, wraiths, and brutes with different speed, HP, and damage
-- **Weapons & chests** — gold chests contain iron swords, war axes, daggers, and potions; swings knock enemies back
+- **Weapons & chests** — loot goes into fixed inventory slots; drag to rearrange, press `3`–`8` or click a weapon to set active
 - **HP system** — brief invincibility after each hit; game over only when HP reaches zero
 
 ## Getting started

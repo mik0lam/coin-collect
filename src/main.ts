@@ -22,7 +22,7 @@ app.innerHTML = `
       <p class="menu-tagline">Descend the dungeon. Loot chests. Slay mobs.</p>
       <div class="menu-coin" aria-hidden="true"></div>
       <button id="play-btn" class="menu-btn" type="button">Play</button>
-      <p class="menu-controls">Move with <kbd>WASD</kbd> or <kbd>Arrow keys</kbd><br />Press <kbd>Space</kbd> to attack · <kbd>I</kbd> inventory · <kbd>1</kbd>/<kbd>2</kbd> potions</p>
+      <p class="menu-controls">Move with <kbd>WASD</kbd> or <kbd>Arrow keys</kbd><br />Press <kbd>Space</kbd> to attack · <kbd>I</kbd> inventory · <kbd>1</kbd>/<kbd>2</kbd> potions · <kbd>3</kbd>–<kbd>8</kbd> weapon slots</p>
     </div>
   </div>
   <div id="game-wrap" class="game-wrap hidden">
@@ -59,7 +59,7 @@ app.innerHTML = `
       </div>
     </header>
     <canvas id="game" width="800" height="444"></canvas>
-    <p class="game-hint">WASD move · Space attack · 1/2 potions · M map · I inventory</p>
+    <p class="game-hint">WASD move · Space attack · 1/2 potions · 3–8 weapon slots · drag items in inventory · M map · I inventory</p>
   </div>
   <div id="game-over" class="menu hidden">
     <div class="menu-content">
@@ -132,7 +132,6 @@ interface MobConfig {
   maxHp: number;
   contactDamage: number;
   currentHp?: number;
-  respawnAt?: number;
 }
 
 interface RuntimeMob {
@@ -144,7 +143,6 @@ interface RuntimeMob {
   hp: number;
   maxHp: number;
   contactDamage: number;
-  deadUntil: number;
   hitFlashUntil: number;
 }
 
@@ -164,6 +162,7 @@ interface InventoryItem {
   type: InventoryItemType;
   healAmount?: number;
   weaponId?: WeaponId;
+  weaponDurability?: number;
 }
 
 interface Room {
@@ -245,13 +244,6 @@ const MOB_COLORS: Record<MobType, { normal: string; hit: string }> = {
   brute: { normal: "#ff8800", hit: "#ffaa44" },
 };
 
-const MOB_TYPE_LABELS: Record<MobType, string> = {
-  snake: "Snake",
-  slime: "Slime",
-  wraith: "Wraith",
-  brute: "Brute",
-};
-
 const PLAY_WIDTH = canvas.width;
 const PLAY_HEIGHT = canvas.height;
 
@@ -278,37 +270,37 @@ let currentRoomId = "";
 const player = {
   x: 100,
   y: 100,
-  size: 30,
+  size: 42,
   speed: 4,
 };
 
 const coin = {
   x: 300,
   y: 200,
-  size: 20,
+  size: 28,
 };
 
 const activeMobs: RuntimeMob[] = [];
-const MOB_RESPAWN_MS = 4000;
 
 let playerFacing: Direction = "east";
 
-let equippedWeapon: { id: WeaponId; durability: number } | null = null;
+let activeWeaponSlot: number | null = null;
 
 const weaponSwing = {
   activeUntil: 0,
   lastAttackAt: 0,
   lastDamagedSwing: 0,
+  swingColor: "",
+  durationMs: 0,
+  range: 0,
 };
 
-const WEAPON_PICKUP_SIZE = 40;
-const STAIRS_TILE_SIZE = 52;
+const WEAPON_PICKUP_SIZE = 48;
+const STAIRS_TILE_SIZE = 56;
 const SWORD_START_POSITION = { x: 200, y: 115 };
-const WEAPON_TUTORIAL_MS = 6000;
 const FLOOR_MESSAGE_MS = 2500;
 const DESCEND_BONUS = 15;
 
-let weaponTutorialUntil = 0;
 let floorMessageUntil = 0;
 let floorMessage = "";
 let stairsCooldownUntil = 0;
@@ -318,13 +310,38 @@ const DOOR_THICKNESS = 10;
 const DOOR_LENGTH = 60;
 const DOOR_HIT_DEPTH = 24;
 
-const POTION_PICKUP_SIZE = 26;
-const CHEST_SIZE = 36;
+const POTION_PICKUP_SIZE = 34;
+const CHEST_SIZE = 44;
 const MAX_INVENTORY_SIZE = 6;
+
+const INVENTORY_UI = {
+  panelX: 120,
+  panelY: 48,
+  panelWidth: 560,
+  panelHeight: 340,
+  slotSize: 72,
+  slotGap: 12,
+  gridX: 148,
+  gridY: 136,
+  cols: 3,
+};
 
 let mapOpen = false;
 let inventoryOpen = false;
-const inventory: InventoryItem[] = [];
+const inventory: (InventoryItem | null)[] = Array.from({ length: MAX_INVENTORY_SIZE }, () => null);
+
+const inventoryDrag = {
+  fromSlot: -1,
+  item: null as InventoryItem | null,
+  x: 0,
+  y: 0,
+  pointerDown: false,
+  dragging: false,
+  startX: 0,
+  startY: 0,
+};
+
+const INVENTORY_DRAG_THRESHOLD = 6;
 
 let state: GameState = "menu";
 let score = 0;
@@ -366,6 +383,36 @@ window.addEventListener("keydown", (event) => {
   if (key === "2" && state === "playing") {
     event.preventDefault();
     useStrongPotion();
+  }
+
+  if (key === "3" && state === "playing") {
+    event.preventDefault();
+    selectWeaponSlot(0);
+  }
+
+  if (key === "4" && state === "playing") {
+    event.preventDefault();
+    selectWeaponSlot(1);
+  }
+
+  if (key === "5" && state === "playing") {
+    event.preventDefault();
+    selectWeaponSlot(2);
+  }
+
+  if (key === "6" && state === "playing") {
+    event.preventDefault();
+    selectWeaponSlot(3);
+  }
+
+  if (key === "7" && state === "playing") {
+    event.preventDefault();
+    selectWeaponSlot(4);
+  }
+
+  if (key === "8" && state === "playing") {
+    event.preventDefault();
+    selectWeaponSlot(5);
   }
 });
 
@@ -443,13 +490,13 @@ function generateMob(type: MobType, depth: number, rng: () => number): MobConfig
         segments.push({ x: spawn.x - i * 28, y: spawn.y });
       }
 
-      return { type, segments, size: 24, speed, maxHp, contactDamage: baseContact };
+      return { type, segments, size: 32, speed, maxHp, contactDamage: baseContact };
     }
     case "slime":
       return {
         type,
         segments: [{ ...spawn }],
-        size: 22,
+        size: 30,
         speed: 0.9 + depth * 0.12 + rng() * 0.15,
         maxHp: Math.floor(1 + depth * 1.2 + rng()),
         contactDamage: Math.floor(baseContact * 0.85),
@@ -458,7 +505,7 @@ function generateMob(type: MobType, depth: number, rng: () => number): MobConfig
       return {
         type,
         segments: [{ ...spawn }],
-        size: 20,
+        size: 28,
         speed: 2.0 + depth * 0.22 + rng() * 0.25,
         maxHp: Math.floor(1 + depth * 1.0 + rng()),
         contactDamage: Math.floor(baseContact * 0.9),
@@ -467,7 +514,7 @@ function generateMob(type: MobType, depth: number, rng: () => number): MobConfig
       return {
         type,
         segments: [{ ...spawn }],
-        size: 32,
+        size: 40,
         speed: 0.85 + depth * 0.1 + rng() * 0.12,
         maxHp: Math.floor(4 + depth * 3.5 + rng() * 2),
         contactDamage: Math.floor(baseContact * 1.15),
@@ -619,7 +666,7 @@ function generateFloor(depth: number, seed: number): Floor {
           { x: 560, y: 310 },
           { x: 590, y: 310 },
         ],
-        size: 24,
+        size: 32,
         speed: 1.2,
         maxHp: 3,
         contactDamage: contactDamageForDepth(1),
@@ -665,9 +712,71 @@ function setMapOpen(open: boolean) {
 function setInventoryOpen(open: boolean) {
   inventoryOpen = open;
   invBtn.textContent = inventoryOpen ? "Close" : "Inv";
+  resetInventoryDrag();
 
   if (open) {
     setMapOpen(false);
+  }
+}
+
+function resetInventoryDrag() {
+  inventoryDrag.fromSlot = -1;
+  inventoryDrag.item = null;
+  inventoryDrag.pointerDown = false;
+  inventoryDrag.dragging = false;
+  canvas.style.cursor = "";
+}
+
+function getCanvasMousePos(event: MouseEvent) {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+
+  return {
+    x: (event.clientX - rect.left) * scaleX,
+    y: (event.clientY - rect.top) * scaleY,
+  };
+}
+
+function getInventorySlotRect(slot: number) {
+  const col = slot % INVENTORY_UI.cols;
+  const row = Math.floor(slot / INVENTORY_UI.cols);
+
+  return {
+    x: INVENTORY_UI.gridX + col * (INVENTORY_UI.slotSize + INVENTORY_UI.slotGap),
+    y: INVENTORY_UI.gridY + row * (INVENTORY_UI.slotSize + INVENTORY_UI.slotGap),
+    w: INVENTORY_UI.slotSize,
+    h: INVENTORY_UI.slotSize,
+  };
+}
+
+function getInventorySlotAt(x: number, y: number) {
+  for (let slot = 0; slot < MAX_INVENTORY_SIZE; slot++) {
+    const rect = getInventorySlotRect(slot);
+
+    if (x >= rect.x && x < rect.x + rect.w && y >= rect.y && y < rect.y + rect.h) {
+      return slot;
+    }
+  }
+
+  return null;
+}
+
+function moveInventoryItem(fromSlot: number, toSlot: number) {
+  if (fromSlot === toSlot) {
+    return;
+  }
+
+  const movingItem = inventory[fromSlot];
+  const targetItem = inventory[toSlot];
+
+  inventory[fromSlot] = targetItem;
+  inventory[toSlot] = movingItem;
+
+  if (activeWeaponSlot === fromSlot) {
+    activeWeaponSlot = toSlot;
+  } else if (activeWeaponSlot === toSlot) {
+    activeWeaponSlot = fromSlot;
   }
 }
 
@@ -691,24 +800,10 @@ function applyRoomState(room: Room) {
   weaponSwing.activeUntil = 0;
   weaponSwing.lastAttackAt = 0;
 
-  const now = performance.now();
-
   for (let i = 0; i < room.enemies.length; i++) {
     const config = room.enemies[i];
 
-    if (config.respawnAt && now < config.respawnAt) {
-      activeMobs.push({
-        configIndex: i,
-        type: config.type,
-        segments: [],
-        size: config.size,
-        speed: config.speed,
-        hp: 0,
-        maxHp: config.maxHp,
-        contactDamage: config.contactDamage,
-        deadUntil: config.respawnAt,
-        hitFlashUntil: 0,
-      });
+    if (config.currentHp !== undefined && config.currentHp <= 0) {
       continue;
     }
 
@@ -721,10 +816,8 @@ function applyRoomState(room: Room) {
       hp: config.currentHp ?? config.maxHp,
       maxHp: config.maxHp,
       contactDamage: config.contactDamage,
-      deadUntil: 0,
       hitFlashUntil: 0,
     });
-    config.respawnAt = undefined;
   }
 }
 
@@ -734,7 +827,6 @@ function saveMobsToRoom() {
   }
 
   const room = getCurrentRoom();
-  const now = performance.now();
 
   for (const mob of activeMobs) {
     const config = room.enemies[mob.configIndex];
@@ -742,13 +834,8 @@ function saveMobsToRoom() {
     if (isMobAlive(mob)) {
       config.currentHp = mob.hp;
       config.segments = mob.segments.map((segment) => ({ ...segment }));
-      config.respawnAt = undefined;
-    } else if (mob.deadUntil > now) {
-      config.currentHp = 0;
-      config.respawnAt = mob.deadUntil;
     } else {
-      config.currentHp = config.maxHp;
-      config.respawnAt = undefined;
+      config.currentHp = 0;
     }
   }
 }
@@ -765,34 +852,103 @@ function isRoomVisited(depth: number, roomId: string) {
   return visitedRooms.has(roomKey(depth, roomId));
 }
 
+function countInventoryItems() {
+  return inventory.filter((slot) => slot !== null).length;
+}
+
+function findFirstEmptySlot() {
+  return inventory.findIndex((slot) => slot === null);
+}
+
+function getWeaponDurability(item: InventoryItem) {
+  return item.weaponDurability ?? WEAPONS[item.weaponId!].maxDurability;
+}
+
+function getActiveWeaponItem() {
+  if (activeWeaponSlot === null) {
+    return null;
+  }
+
+  const item = inventory[activeWeaponSlot];
+
+  if (!item || item.type !== "weapon" || !item.weaponId) {
+    return null;
+  }
+
+  return item;
+}
+
 function hasUsableWeapon() {
-  return equippedWeapon !== null && equippedWeapon.durability > 0;
+  const item = getActiveWeaponItem();
+  return item !== null && getWeaponDurability(item) > 0;
 }
 
 function getEquippedWeaponDef(): WeaponDef {
-  return WEAPONS[equippedWeapon!.id];
+  return WEAPONS[getActiveWeaponItem()!.weaponId!];
 }
 
-function consumeWeaponDurability(amount: number) {
-  if (!equippedWeapon) {
+function selectWeaponSlot(slot: number) {
+  const item = inventory[slot];
+
+  if (!item || item.type !== "weapon" || !item.weaponId) {
+    showFloorMessage(`Slot ${slot + 1} has no weapon.`);
     return;
   }
 
-  equippedWeapon.durability = Math.max(0, equippedWeapon.durability - amount);
+  if (getWeaponDurability(item) <= 0) {
+    showFloorMessage("That weapon is broken.");
+    return;
+  }
 
-  if (equippedWeapon.durability <= 0) {
-    const name = WEAPONS[equippedWeapon.id].name;
-    equippedWeapon = null;
+  activeWeaponSlot = slot;
+  showFloorMessage(`Active weapon: ${WEAPONS[item.weaponId].name}`);
+}
+
+function ensureActiveWeaponSlot() {
+  if (hasUsableWeapon()) {
+    return;
+  }
+
+  const nextWeaponSlot = inventory.findIndex(
+    (item) => item?.type === "weapon" && item.weaponId && getWeaponDurability(item) > 0,
+  );
+
+  activeWeaponSlot = nextWeaponSlot >= 0 ? nextWeaponSlot : null;
+}
+
+function consumeWeaponDurability(amount: number) {
+  const item = getActiveWeaponItem();
+
+  if (!item || activeWeaponSlot === null) {
+    return;
+  }
+
+  const durability = Math.max(0, getWeaponDurability(item) - amount);
+  item.weaponDurability = durability;
+
+  if (durability <= 0) {
+    const name = WEAPONS[item.weaponId!].name;
     showFloorMessage(`Your ${name} broke!`);
+    ensureActiveWeaponSlot();
   }
 }
 
-function equipWeapon(weaponId: WeaponId) {
-  equippedWeapon = {
-    id: weaponId,
-    durability: WEAPONS[weaponId].maxDurability,
-  };
-  weaponTutorialUntil = performance.now() + WEAPON_TUTORIAL_MS;
+function addWeaponToInventory(weaponId: WeaponId, durability = WEAPONS[weaponId].maxDurability) {
+  const slot = addToInventory({
+    type: "weapon",
+    weaponId,
+    weaponDurability: durability,
+  });
+
+  if (slot === null) {
+    return null;
+  }
+
+  if (!hasUsableWeapon()) {
+    activeWeaponSlot = slot;
+  }
+
+  return slot;
 }
 
 function loadRoom(roomId: string) {
@@ -887,13 +1043,17 @@ function resetGame() {
   score = 0;
   hp.current = hp.max;
   invincibleUntil = 0;
-  equippedWeapon = { id: "rusty-sword", durability: WEAPONS["rusty-sword"].maxDurability };
-  weaponTutorialUntil = performance.now() + WEAPON_TUTORIAL_MS;
+  inventory.fill(null);
+  inventory[0] = {
+    type: "weapon",
+    weaponId: "rusty-sword",
+    weaponDurability: WEAPONS["rusty-sword"].maxDurability,
+  };
+  activeWeaponSlot = 0;
   floorMessageUntil = 0;
   floorMessage = "";
   stairsCooldownUntil = 0;
   visitedRooms.clear();
-  inventory.length = 0;
   setMapOpen(false);
   setInventoryOpen(false);
   playerFacing = "east";
@@ -959,17 +1119,17 @@ function getSwingHitbox() {
 }
 
 function getSwingArcAngles(): { start: number; end: number } {
-  const sweep = Math.PI * 0.55;
+  const sweep = Math.PI * 0.7;
 
   switch (playerFacing) {
     case "east":
-      return { start: -Math.PI / 2 - sweep / 2, end: -Math.PI / 2 + sweep / 2 };
+      return { start: -sweep * 0.5, end: sweep * 0.5 };
     case "west":
-      return { start: Math.PI / 2 - sweep / 2, end: Math.PI / 2 + sweep / 2 };
+      return { start: Math.PI - sweep * 0.5, end: Math.PI + sweep * 0.5 };
     case "north":
-      return { start: Math.PI - sweep / 2, end: Math.PI + sweep / 2 };
+      return { start: -Math.PI / 2 - sweep * 0.5, end: -Math.PI / 2 + sweep * 0.5 };
     case "south":
-      return { start: -sweep / 2, end: sweep / 2 };
+      return { start: Math.PI / 2 - sweep * 0.5, end: Math.PI / 2 + sweep * 0.5 };
   }
 }
 
@@ -979,8 +1139,6 @@ function slayMob(mob: RuntimeMob) {
   const room = getCurrentRoom();
   const config = room.enemies[mob.configIndex];
   config.currentHp = 0;
-  config.respawnAt = performance.now() + MOB_RESPAWN_MS;
-  mob.deadUntil = config.respawnAt;
   score += 3;
 }
 
@@ -1037,8 +1195,11 @@ function tryAttack() {
 
   weaponSwing.lastAttackAt = now;
   weaponSwing.activeUntil = now + def.durationMs;
-  consumeWeaponDurability(1);
+  weaponSwing.swingColor = def.swingColor;
+  weaponSwing.durationMs = def.durationMs;
+  weaponSwing.range = def.range;
   checkWeaponHits();
+  consumeWeaponDurability(1);
 }
 
 function getWeaponPickupPosition() {
@@ -1061,18 +1222,20 @@ function tryPickupWeapon() {
     return;
   }
 
-  if (!equippedWeapon) {
-    equipWeapon(pickup.weaponId);
-    showFloorMessage(`Equipped ${WEAPONS[pickup.weaponId].name}!`);
-  } else {
-    addToInventory({ type: "weapon", weaponId: pickup.weaponId });
-    showFloorMessage(`${WEAPONS[pickup.weaponId].name} added to inventory`);
+  const slot = addWeaponToInventory(pickup.weaponId);
+
+  if (slot !== null) {
+    showFloorMessage(`${WEAPONS[pickup.weaponId].name} → slot ${slot + 1}`);
   }
 
   delete getCurrentRoom().weaponPickup;
 }
 
 function checkWeaponHits() {
+  if (!hasUsableWeapon()) {
+    return;
+  }
+
   if (weaponSwing.lastAttackAt === weaponSwing.lastDamagedSwing) {
     return;
   }
@@ -1106,27 +1269,6 @@ function checkWeaponHits() {
     if (hit) {
       break;
     }
-  }
-}
-
-function updateMobRespawns() {
-  const now = performance.now();
-
-  for (const mob of activeMobs) {
-    if (isMobAlive(mob) || now < mob.deadUntil) {
-      continue;
-    }
-
-    const config = getCurrentRoom().enemies[mob.configIndex];
-    mob.segments = config.segments.map((segment) => ({ ...segment }));
-    mob.size = config.size;
-    mob.speed = config.speed;
-    mob.maxHp = config.maxHp;
-    mob.hp = config.maxHp;
-    mob.contactDamage = config.contactDamage;
-    mob.deadUntil = 0;
-    config.currentHp = config.maxHp;
-    config.respawnAt = undefined;
   }
 }
 
@@ -1399,23 +1541,25 @@ function moveMobs() {
 }
 
 function updateWeapon() {
-  if (performance.now() < weaponSwing.activeUntil) {
+  if (performance.now() < weaponSwing.activeUntil && hasUsableWeapon()) {
     checkWeaponHits();
   }
 }
 
 function addToInventory(item: InventoryItem) {
-  if (inventory.length >= MAX_INVENTORY_SIZE) {
+  const slot = findFirstEmptySlot();
+
+  if (slot === -1) {
     showFloorMessage("Inventory full!");
-    return false;
+    return null;
   }
 
-  inventory.push(item);
-  return true;
+  inventory[slot] = item;
+  return slot;
 }
 
 function usePotion(type: "health-potion" | "strong-potion") {
-  const potionIndex = inventory.findIndex((item) => item.type === type);
+  const potionIndex = inventory.findIndex((item) => item?.type === type);
 
   if (potionIndex === -1) {
     showFloorMessage(type === "health-potion" ? "No health potions." : "No strong potions.");
@@ -1427,10 +1571,10 @@ function usePotion(type: "health-potion" | "strong-potion") {
     return;
   }
 
-  const potion = inventory[potionIndex];
+  const potion = inventory[potionIndex]!;
   const healed = Math.min(potion.healAmount ?? 0, hp.max - hp.current);
   hp.current += healed;
-  inventory.splice(potionIndex, 1);
+  inventory[potionIndex] = null;
   showFloorMessage(`Restored ${healed} HP!`);
 }
 
@@ -1469,7 +1613,7 @@ function tryPickupPotion() {
     addToInventory({
       type: "health-potion",
       healAmount,
-    })
+    }) !== null
   ) {
     room.potionCollected = true;
     showFloorMessage(`Potion collected (+${healAmount} HP)`);
@@ -1478,16 +1622,16 @@ function tryPickupPotion() {
 
 function collectChestLoot(loot: ChestLoot) {
   if (loot.kind === "weapon") {
-    if (!equippedWeapon) {
-      equipWeapon(loot.weaponId);
-      showFloorMessage(`Equipped ${WEAPONS[loot.weaponId].name}!`);
-    } else if (addToInventory({ type: "weapon", weaponId: loot.weaponId })) {
-      showFloorMessage(`${WEAPONS[loot.weaponId].name} added to inventory`);
+    const slot = addWeaponToInventory(loot.weaponId);
+
+    if (slot !== null) {
+      showFloorMessage(`${WEAPONS[loot.weaponId].name} → slot ${slot + 1}`);
     }
+
     return;
   }
 
-  if (addToInventory({ type: loot.kind, healAmount: loot.healAmount })) {
+  if (addToInventory({ type: loot.kind, healAmount: loot.healAmount }) !== null) {
     const label = loot.kind === "strong-potion" ? "Strong potion" : "Health potion";
     showFloorMessage(`${label} collected (+${loot.healAmount} HP)`);
   }
@@ -1519,7 +1663,6 @@ function update() {
   }
 
   movePlayer();
-  updateMobRespawns();
   moveMobs();
   updateWeapon();
 
@@ -1545,19 +1688,22 @@ function updateHtmlHud() {
   hudScoreEl.textContent = String(score);
   hudDepthEl.textContent = String(currentDepth);
   hudRoomEl.textContent = room.name;
-  hudItemsEl.textContent = `${inventory.length}/${MAX_INVENTORY_SIZE} items`;
+  hudItemsEl.textContent = `${countInventoryItems()}/${MAX_INVENTORY_SIZE} items`;
 
   const hpRatio = hp.current / hp.max;
   hudHpFillEl.style.width = `${Math.max(0, Math.min(1, hpRatio)) * 100}%`;
   hudHpTextEl.textContent = String(hp.current);
 
-  if (hasUsableWeapon()) {
-    const def = getEquippedWeaponDef();
+  const activeWeapon = getActiveWeaponItem();
+
+  if (activeWeapon && getWeaponDurability(activeWeapon) > 0) {
+    const def = WEAPONS[activeWeapon.weaponId!];
+    const durability = getWeaponDurability(activeWeapon);
     const cooldownReady = performance.now() >= weaponSwing.lastAttackAt + def.cooldownMs;
     hudWeaponNameEl.textContent = cooldownReady
-      ? `${def.name} (${equippedWeapon!.durability})`
+      ? `${def.name} (${durability})`
       : "Cooling down…";
-    hudDurFillEl.style.width = `${(equippedWeapon!.durability / def.maxDurability) * 100}%`;
+    hudDurFillEl.style.width = `${(durability / def.maxDurability) * 100}%`;
     hudWeaponNameEl.classList.toggle("hud-weapon-ready", cooldownReady);
     hudWeaponNameEl.classList.toggle("hud-weapon-cooldown", !cooldownReady);
   } else {
@@ -1937,11 +2083,58 @@ function drawMobHpBar(mob: RuntimeMob) {
   ctx.strokeRect(x, y, barWidth, barHeight);
 }
 
+function drawInventoryItem(
+  item: InventoryItem,
+  slotX: number,
+  slotY: number,
+  slotSize: number,
+  faded = false,
+) {
+  const iconSize = 40;
+  const centerX = slotX + slotSize / 2;
+
+  if (faded) {
+    ctx.globalAlpha = 0.75;
+  }
+
+  if (item.type === "health-potion") {
+    drawSprite(ctx, SPRITES.potionHealth, slotX + 16, slotY + 18, iconSize, iconSize);
+    ctx.fillStyle = "#ddd";
+    ctx.font = "10px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText(`HP +${item.healAmount}`, centerX, slotY + slotSize - 8);
+    ctx.fillStyle = "#777";
+    ctx.font = "9px Arial";
+    ctx.fillText("Press 1", centerX, slotY + slotSize - 20);
+  } else if (item.type === "strong-potion") {
+    drawSprite(ctx, SPRITES.potionStrong, slotX + 16, slotY + 18, iconSize, iconSize);
+    ctx.fillStyle = "#ddd";
+    ctx.font = "10px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText(`HP +${item.healAmount}`, centerX, slotY + slotSize - 8);
+    ctx.fillStyle = "#777";
+    ctx.font = "9px Arial";
+    ctx.fillText("Press 2", centerX, slotY + slotSize - 20);
+  } else if (item.type === "weapon" && item.weaponId) {
+    drawSprite(ctx, SPRITES.swordPickup, slotX + 16, slotY + 16, iconSize, iconSize);
+    const dur = getWeaponDurability(item);
+    const maxDur = WEAPONS[item.weaponId].maxDurability;
+    ctx.fillStyle = "#fff";
+    ctx.font = "9px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText(WEAPONS[item.weaponId].name, centerX, slotY + slotSize - 20);
+    ctx.fillStyle = dur > maxDur * 0.25 ? "#ccc" : "#f88";
+    ctx.fillText(`${dur}/${maxDur}`, centerX, slotY + slotSize - 8);
+  }
+
+  ctx.globalAlpha = 1;
+  ctx.textAlign = "left";
+}
+
 function drawInventoryOverlay() {
-  const panelX = 180;
-  const panelY = 70;
-  const panelWidth = 440;
-  const panelHeight = 300;
+  const { panelX, panelY, panelWidth, panelHeight, slotSize } = INVENTORY_UI;
+  const hoverSlot =
+    inventoryDrag.dragging ? getInventorySlotAt(inventoryDrag.x, inventoryDrag.y) : null;
 
   ctx.fillStyle = "rgba(0, 0, 0, 0.82)";
   ctx.fillRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
@@ -1960,66 +2153,65 @@ function drawInventoryOverlay() {
   ctx.font = "14px Arial";
   ctx.fillStyle = "#aaa";
   ctx.fillText(
-    `${inventory.length}/${MAX_INVENTORY_SIZE} slots used`,
+    `${countInventoryItems()}/${MAX_INVENTORY_SIZE} slots · drag to rearrange · 3–8 active weapon`,
     panelX + panelWidth / 2,
     panelY + 54,
   );
 
-  const slotX = panelX + 24;
-  let slotY = panelY + 78;
-  const slotWidth = panelWidth - 48;
-  const slotHeight = 44;
+  for (let i = 0; i < MAX_INVENTORY_SIZE; i++) {
+    const { x: slotX, y: slotY } = getInventorySlotRect(i);
+    const item = inventory[i];
+    const isActiveWeapon = i === activeWeaponSlot && item?.type === "weapon";
+    const isDragSource = inventoryDrag.dragging && inventoryDrag.fromSlot === i;
+    const isDropTarget = hoverSlot === i && inventoryDrag.fromSlot !== i;
 
-  if (inventory.length === 0) {
-    ctx.fillStyle = "#666";
-    ctx.font = "16px Arial";
-    ctx.fillText("Empty — loot chests and explore", panelX + panelWidth / 2, panelY + 150);
-  } else {
+    ctx.fillStyle = isActiveWeapon ? "#3a2a18" : "#24202a";
+    ctx.fillRect(slotX, slotY, slotSize, slotSize);
+    ctx.strokeStyle = isDropTarget ? "#88ff88" : isActiveWeapon ? "#ffaa44" : "#555";
+    ctx.lineWidth = isDropTarget ? 3 : isActiveWeapon ? 3 : 1;
+    ctx.strokeRect(slotX, slotY, slotSize, slotSize);
+
+    ctx.fillStyle = "#888";
+    ctx.font = "11px Arial";
     ctx.textAlign = "left";
-    ctx.font = "15px Arial";
+    ctx.fillText(`${i + 3}`, slotX + 6, slotY + 14);
 
-    for (let i = 0; i < inventory.length; i++) {
-      const item = inventory[i];
-
-      ctx.fillStyle = "#2a2030";
-      ctx.fillRect(slotX, slotY, slotWidth, slotHeight);
-      ctx.strokeStyle = "#555";
-      ctx.strokeRect(slotX, slotY, slotWidth, slotHeight);
-
-      if (item.type === "health-potion") {
-        drawSprite(ctx, SPRITES.potionHealth, slotX + 8, slotY + 8, 28, 28);
-        ctx.fillStyle = "#fff";
-        ctx.fillText(`Health Potion — restores ${item.healAmount} HP`, slotX + 44, slotY + 27);
-      } else if (item.type === "strong-potion") {
-        drawSprite(ctx, SPRITES.potionStrong, slotX + 8, slotY + 8, 28, 28);
-        ctx.fillStyle = "#fff";
-        ctx.fillText(`Strong Potion — restores ${item.healAmount} HP`, slotX + 44, slotY + 27);
-      } else if (item.type === "weapon" && item.weaponId) {
-        drawSprite(ctx, SPRITES.swordPickup, slotX + 8, slotY + 8, 28, 28);
-        ctx.fillStyle = "#fff";
-        ctx.fillText(`${WEAPONS[item.weaponId].name} (stored)`, slotX + 44, slotY + 27);
-      }
-
-      if (item.type === "health-potion" && inventory.findIndex((entry) => entry.type === "health-potion") === i) {
-        ctx.fillStyle = "#888";
-        ctx.font = "12px Arial";
-        ctx.textAlign = "right";
-        ctx.fillText("Press 1", slotX + slotWidth - 10, slotY + 27);
-        ctx.textAlign = "left";
-        ctx.font = "15px Arial";
-      }
-
-      if (item.type === "strong-potion" && inventory.findIndex((entry) => entry.type === "strong-potion") === i) {
-        ctx.fillStyle = "#888";
-        ctx.font = "12px Arial";
-        ctx.textAlign = "right";
-        ctx.fillText("Press 2", slotX + slotWidth - 10, slotY + 27);
-        ctx.textAlign = "left";
-        ctx.font = "15px Arial";
-      }
-
-      slotY += slotHeight + 8;
+    if (isActiveWeapon) {
+      ctx.fillStyle = "#ffaa44";
+      ctx.font = "bold 9px Arial";
+      ctx.textAlign = "right";
+      ctx.fillText("ACTIVE", slotX + slotSize - 6, slotY + 14);
     }
+
+    if (!item) {
+      ctx.fillStyle = "#555";
+      ctx.font = "12px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText("Empty", slotX + slotSize / 2, slotY + slotSize / 2 + 4);
+      ctx.textAlign = "left";
+      continue;
+    }
+
+    if (!isDragSource) {
+      drawInventoryItem(item, slotX, slotY, slotSize);
+    } else {
+      ctx.fillStyle = "rgba(255, 255, 255, 0.08)";
+      ctx.fillRect(slotX + 4, slotY + 4, slotSize - 8, slotSize - 8);
+    }
+  }
+
+  if (inventoryDrag.dragging && inventoryDrag.item) {
+    const ghostX = inventoryDrag.x - slotSize / 2;
+    const ghostY = inventoryDrag.y - slotSize / 2;
+
+    ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+    ctx.fillRect(ghostX + 3, ghostY + 5, slotSize, slotSize);
+    ctx.fillStyle = "#3a3048";
+    ctx.fillRect(ghostX, ghostY, slotSize, slotSize);
+    ctx.strokeStyle = "#c8a0ff";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(ghostX, ghostY, slotSize, slotSize);
+    drawInventoryItem(inventoryDrag.item, ghostX, ghostY, slotSize, true);
   }
 
   ctx.textAlign = "center";
@@ -2029,37 +2221,77 @@ function drawInventoryOverlay() {
   ctx.textAlign = "left";
 }
 
-function drawWeaponTutorial() {
-  if (!hasUsableWeapon() || performance.now() >= weaponTutorialUntil) {
+function handleInventoryMouseDown(event: MouseEvent) {
+  if (!inventoryOpen || state !== "playing") {
     return;
   }
 
-  const bannerX = 60;
-  const bannerY = 16;
-  const bannerWidth = PLAY_WIDTH - 120;
-  const bannerHeight = 64;
-  const def = getEquippedWeaponDef();
+  const pos = getCanvasMousePos(event);
+  const slot = getInventorySlotAt(pos.x, pos.y);
 
-  ctx.fillStyle = "rgba(0, 0, 0, 0.85)";
-  ctx.fillRect(bannerX, bannerY, bannerWidth, bannerHeight);
+  if (slot === null || !inventory[slot]) {
+    return;
+  }
 
-  ctx.strokeStyle = "#ff8844";
-  ctx.lineWidth = 2;
-  ctx.strokeRect(bannerX, bannerY, bannerWidth, bannerHeight);
+  event.preventDefault();
+  inventoryDrag.pointerDown = true;
+  inventoryDrag.dragging = false;
+  inventoryDrag.fromSlot = slot;
+  inventoryDrag.item = inventory[slot];
+  inventoryDrag.startX = pos.x;
+  inventoryDrag.startY = pos.y;
+  inventoryDrag.x = pos.x;
+  inventoryDrag.y = pos.y;
+}
 
-  ctx.fillStyle = "#ff8844";
-  ctx.font = "bold 20px Arial";
-  ctx.textAlign = "center";
-  ctx.fillText(`Equipped ${def.name}!`, PLAY_WIDTH / 2, bannerY + 26);
+function handleInventoryMouseMove(event: MouseEvent) {
+  if (!inventoryOpen || !inventoryDrag.pointerDown) {
+    return;
+  }
 
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "16px Arial";
-  ctx.fillText(
-    "Press SPACE to attack. Each swing uses durability.",
-    PLAY_WIDTH / 2,
-    bannerY + 50,
-  );
-  ctx.textAlign = "left";
+  const pos = getCanvasMousePos(event);
+  inventoryDrag.x = pos.x;
+  inventoryDrag.y = pos.y;
+
+  if (!inventoryDrag.dragging) {
+    const dx = pos.x - inventoryDrag.startX;
+    const dy = pos.y - inventoryDrag.startY;
+
+    if (Math.hypot(dx, dy) >= INVENTORY_DRAG_THRESHOLD) {
+      inventoryDrag.dragging = true;
+      canvas.style.cursor = "grabbing";
+    }
+  }
+}
+
+function handleInventoryMouseUp(event: MouseEvent) {
+  if (!inventoryOpen || !inventoryDrag.pointerDown) {
+    return;
+  }
+
+  const pos = getCanvasMousePos(event);
+  const fromSlot = inventoryDrag.fromSlot;
+  const wasDragging = inventoryDrag.dragging;
+
+  if (wasDragging) {
+    const toSlot = getInventorySlotAt(pos.x, pos.y);
+
+    if (toSlot !== null) {
+      moveInventoryItem(fromSlot, toSlot);
+    }
+  } else if (inventory[fromSlot]?.type === "weapon") {
+    selectWeaponSlot(fromSlot);
+  }
+
+  resetInventoryDrag();
+}
+
+function handleInventoryMouseLeave() {
+  if (inventoryDrag.dragging && inventoryDrag.fromSlot >= 0) {
+    resetInventoryDrag();
+  } else if (inventoryDrag.pointerDown) {
+    resetInventoryDrag();
+  }
 }
 
 function drawFloorMessage() {
@@ -2087,42 +2319,48 @@ function drawFloorMessage() {
 }
 
 function drawWeaponSwing() {
-  if (!hasUsableWeapon()) {
-    return;
-  }
-
   const now = performance.now();
 
   if (now >= weaponSwing.activeUntil) {
     return;
   }
 
-  const def = getEquippedWeaponDef();
   const centerX = player.x + player.size / 2;
   const centerY = player.y + player.size / 2;
   const elapsed = now - weaponSwing.lastAttackAt;
-  const progress = Math.min(1, elapsed / def.durationMs);
+  const rawProgress = Math.min(1, elapsed / weaponSwing.durationMs);
+  const progress = 1 - (1 - rawProgress) ** 2;
   const { start, end } = getSwingArcAngles();
-  const currentAngle = start + (end - start) * progress;
-  const arcSpan = Math.PI * 0.55;
-  const arcStart = currentAngle - arcSpan * 0.35;
-  const arcEnd = currentAngle + arcSpan * 0.15;
+  const arcStart = start;
+  const arcEnd = start + (end - start) * progress;
+  const radius = weaponSwing.range * 0.92;
 
   ctx.save();
-  ctx.strokeStyle = def.swingColor;
-  ctx.fillStyle = def.swingColor;
-  ctx.lineWidth = 5;
-  ctx.lineCap = "round";
-  ctx.beginPath();
-  ctx.arc(centerX, centerY, def.range * 0.85, arcStart, arcEnd);
-  ctx.stroke();
+  ctx.strokeStyle = weaponSwing.swingColor;
+  ctx.fillStyle = weaponSwing.swingColor;
+
   ctx.beginPath();
   ctx.moveTo(centerX, centerY);
-  ctx.arc(centerX, centerY, def.range * 0.85, arcStart, arcEnd);
+  ctx.arc(centerX, centerY, radius, arcStart, arcEnd);
   ctx.closePath();
-  ctx.globalAlpha = 0.35;
+  ctx.globalAlpha = 0.28;
   ctx.fill();
+
+  ctx.globalAlpha = 0.85;
+  ctx.lineWidth = 4;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, radius, arcStart, arcEnd);
+  ctx.stroke();
+
+  const tipX = centerX + Math.cos(arcEnd) * radius;
+  const tipY = centerY + Math.sin(arcEnd) * radius;
   ctx.globalAlpha = 1;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(centerX, centerY);
+  ctx.lineTo(tipX, tipY);
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -2185,23 +2423,9 @@ function draw() {
       });
 
       drawMobHpBar(mob);
-    } else if (performance.now() < mob.deadUntil) {
-      const config = getCurrentRoom().enemies[mob.configIndex];
-      const anchor = config.segments[0] ?? { x: PLAY_WIDTH / 2, y: PLAY_HEIGHT / 2 };
-      ctx.fillStyle = "rgba(255,255,255,0.7)";
-      ctx.font = "14px Arial";
-      ctx.textAlign = "center";
-      const secondsLeft = Math.ceil((mob.deadUntil - performance.now()) / 1000);
-      ctx.fillText(
-        `${MOB_TYPE_LABELS[mob.type]} respawns in ${secondsLeft}s`,
-        anchor.x + mob.size / 2,
-        anchor.y - 8,
-      );
-      ctx.textAlign = "left";
     }
   }
 
-  drawWeaponTutorial();
   drawFloorMessage();
   updateHtmlHud();
 
@@ -2228,3 +2452,7 @@ playBtn.addEventListener("click", startGame);
 menuBtn.addEventListener("click", showMenu);
 mapBtn.addEventListener("click", toggleMap);
 invBtn.addEventListener("click", toggleInventory);
+canvas.addEventListener("mousedown", handleInventoryMouseDown);
+canvas.addEventListener("mousemove", handleInventoryMouseMove);
+window.addEventListener("mouseup", handleInventoryMouseUp);
+canvas.addEventListener("mouseleave", handleInventoryMouseLeave);

@@ -18,10 +18,10 @@ app.innerHTML = `
   <div id="menu" class="menu">
     <div class="menu-content">
       <h1 class="menu-title">Coin Collect</h1>
-      <p class="menu-tagline">Grab the gold. Dodge the snake.</p>
+      <p class="menu-tagline">Descend the dungeon. Grab gold. Slay snakes.</p>
       <div class="menu-coin" aria-hidden="true"></div>
       <button id="play-btn" class="menu-btn" type="button">Play</button>
-      <p class="menu-controls">Move with <kbd>WASD</kbd> or <kbd>Arrow keys</kbd><br />Attack with <kbd>Space</kbd></p>
+      <p class="menu-controls">Move with <kbd>WASD</kbd> or <kbd>Arrow keys</kbd><br />Sword in first room · Stairs <kbd>▼</kbd> in room center</p>
     </div>
   </div>
   <canvas id="game" class="hidden" width="800" height="500"></canvas>
@@ -29,7 +29,7 @@ app.innerHTML = `
     <div class="menu-content">
       <h1 class="game-over-title">Game Over</h1>
       <p class="game-over-message">The snake got you!</p>
-      <p class="game-over-score">Score: <span id="final-score">0</span></p>
+      <p class="game-over-score">Depth <span id="final-depth">1</span> · Score <span id="final-score">0</span></p>
       <button id="menu-btn" class="menu-btn" type="button">Main Menu</button>
     </div>
   </div>
@@ -51,6 +51,10 @@ const finalScoreEl = required(
   document.querySelector<HTMLSpanElement>("#final-score"),
   "Final score",
 );
+const finalDepthEl = required(
+  document.querySelector<HTMLSpanElement>("#final-depth"),
+  "Final depth",
+);
 
 type GameState = "menu" | "playing" | "gameover";
 type Direction = "north" | "south" | "east" | "west";
@@ -68,84 +72,40 @@ interface Room {
   exits: Partial<Record<Direction, string>>;
   coin: { x: number; y: number };
   snake: SnakeConfig;
+  swordPickup?: { x: number; y: number };
+  stairsDownTile?: { x: number; y: number };
+  stairsUpTile?: { x: number; y: number };
+}
+
+interface Floor {
+  depth: number;
+  rooms: Record<string, Room>;
+  startRoomId: string;
+  stairsDownRoomId: string;
 }
 
 const HUD_HEIGHT = 72;
 const PLAY_WIDTH = canvas.width;
 const PLAY_HEIGHT = canvas.height - HUD_HEIGHT;
 
-const rooms: Record<string, Room> = {
-  courtyard: {
-    id: "courtyard",
-    name: "Courtyard",
-    background: "#0d1a0d",
-    exits: { east: "east-hall", south: "south-garden" },
-    coin: { x: 220, y: 160 },
-    snake: {
-      segments: [
-        { x: 520, y: 280 },
-        { x: 550, y: 280 },
-        { x: 580, y: 280 },
-      ],
-      size: 24,
-      speed: 2,
-    },
-  },
-  "east-hall": {
-    id: "east-hall",
-    name: "East Hall",
-    background: "#1a0d1a",
-    exits: { west: "courtyard", south: "vault" },
-    coin: { x: 380, y: 200 },
-    snake: {
-      segments: [
-        { x: 180, y: 120 },
-        { x: 210, y: 120 },
-        { x: 240, y: 120 },
-        { x: 270, y: 120 },
-      ],
-      size: 24,
-      speed: 2.5,
-    },
-  },
-  "south-garden": {
-    id: "south-garden",
-    name: "South Garden",
-    background: "#0d1a1a",
-    exits: { north: "courtyard", east: "vault" },
-    coin: { x: 300, y: 250 },
-    snake: {
-      segments: [
-        { x: 600, y: 100 },
-        { x: 630, y: 100 },
-        { x: 660, y: 100 },
-      ],
-      size: 24,
-      speed: 2.25,
-    },
-  },
-  vault: {
-    id: "vault",
-    name: "Treasure Vault",
-    background: "#1a1a0d",
-    exits: { north: "east-hall", west: "south-garden" },
-    coin: { x: 400, y: 180 },
-    snake: {
-      segments: [
-        { x: 200, y: 320 },
-        { x: 230, y: 320 },
-        { x: 260, y: 320 },
-        { x: 290, y: 320 },
-        { x: 320, y: 320 },
-      ],
-      size: 24,
-      speed: 3,
-    },
-  },
-};
+const ROOM_NAME_PARTS = [
+  "Chamber",
+  "Hall",
+  "Crypt",
+  "Gallery",
+  "Passage",
+  "Vault",
+  "Cavern",
+  "Den",
+  "Tunnel",
+  "Sanctum",
+];
 
-let state: GameState = "menu";
-let currentRoomId = "courtyard";
+let runSeed = 0;
+let currentDepth = 1;
+let deepestDepth = 1;
+const floors = new Map<number, Floor>();
+let currentRoomId = "";
 
 const player = {
   x: 100,
@@ -180,6 +140,21 @@ const weapon = {
   lastAttackAt: 0,
 };
 
+const SWORD_PICKUP_SIZE = 40;
+const STAIRS_TILE_SIZE = 52;
+const SWORD_START_POSITION = { x: 200, y: 115 };
+const SWORD_TUTORIAL_MS = 6000;
+const FLOOR_MESSAGE_MS = 2500;
+const DESCEND_BONUS = 15;
+
+let hasSword = false;
+let swordTutorialUntil = 0;
+let floorMessageUntil = 0;
+let floorMessage = "";
+let stairsCooldownUntil = 0;
+const STAIRS_COOLDOWN_MS = 900;
+
+let state: GameState = "menu";
 let score = 0;
 
 const hp = {
@@ -207,13 +182,159 @@ window.addEventListener("keyup", (event) => {
   keys.delete(event.key.toLowerCase());
 });
 
-function getCurrentRoom(): Room {
-  return rooms[currentRoomId];
+function createRng(seed: number) {
+  let rngState = seed >>> 0;
+
+  return () => {
+    rngState = (rngState * 1664525 + 1013904223) >>> 0;
+    return rngState / 4294967296;
+  };
 }
 
-function loadRoom(roomId: string) {
-  const room = rooms[roomId];
-  currentRoomId = roomId;
+function randomPosition(rng: () => number, margin = 60) {
+  const maxX = PLAY_WIDTH - margin - 40;
+  const maxY = PLAY_HEIGHT - margin - 40;
+
+  return {
+    x: margin + rng() * Math.max(1, maxX - margin),
+    y: margin + rng() * Math.max(1, maxY - margin),
+  };
+}
+
+function backgroundForDepth(depth: number, variant: number) {
+  const hue = (205 + depth * 14 + variant * 27) % 360;
+  const lightness = Math.max(7, 20 - depth * 1.5);
+  return `hsl(${hue}, 38%, ${lightness}%)`;
+}
+
+function stairsTilePosition() {
+  return {
+    x: PLAY_WIDTH / 2 - STAIRS_TILE_SIZE / 2,
+    y: PLAY_HEIGHT / 2 - STAIRS_TILE_SIZE / 2,
+  };
+}
+
+function generateSnake(depth: number, rng: () => number): SnakeConfig {
+  const segmentCount = Math.min(8, 2 + depth + Math.floor(rng() * 3));
+  const speed = 1.75 + depth * 0.28 + rng() * 0.4;
+  const spawn = randomPosition(rng, 100);
+  const segments: { x: number; y: number }[] = [];
+
+  for (let i = 0; i < segmentCount; i++) {
+    segments.push({ x: spawn.x - i * 28, y: spawn.y });
+  }
+
+  return { segments, size: 24, speed };
+}
+
+function generateFloor(depth: number, seed: number): Floor {
+  const rng = createRng(seed);
+  const roomCount = Math.min(8, 4 + Math.floor(depth / 2) + Math.floor(rng() * 2));
+  const grid = new Map<string, { id: string; gx: number; gy: number }>();
+  const startId = `d${depth}-r0`;
+
+  grid.set("0,0", { id: startId, gx: 0, gy: 0 });
+
+  const directions = [
+    { dx: 0, dy: -1, dir: "north" as Direction, opposite: "south" as Direction },
+    { dx: 1, dy: 0, dir: "east" as Direction, opposite: "west" as Direction },
+    { dx: 0, dy: 1, dir: "south" as Direction, opposite: "north" as Direction },
+    { dx: -1, dy: 0, dir: "west" as Direction, opposite: "east" as Direction },
+  ];
+
+  while (grid.size < roomCount) {
+    const cells = [...grid.values()];
+    const parent = cells[Math.floor(rng() * cells.length)];
+    const step = directions[Math.floor(rng() * directions.length)];
+    const gx = parent.gx + step.dx;
+    const gy = parent.gy + step.dy;
+    const key = `${gx},${gy}`;
+
+    if (!grid.has(key)) {
+      grid.set(key, { id: `d${depth}-r${grid.size}`, gx, gy });
+    }
+  }
+
+  const rooms: Record<string, Room> = {};
+  let farthestRoomId = startId;
+  let farthestDistance = 0;
+
+  for (const cell of grid.values()) {
+    const exits: Partial<Record<Direction, string>> = {};
+
+    for (const step of directions) {
+      const neighbor = grid.get(`${cell.gx + step.dx},${cell.gy + step.dy}`);
+
+      if (neighbor) {
+        exits[step.dir] = neighbor.id;
+      }
+    }
+
+    const distance = Math.abs(cell.gx) + Math.abs(cell.gy);
+
+    if (distance > farthestDistance) {
+      farthestDistance = distance;
+      farthestRoomId = cell.id;
+    }
+
+    const namePart = ROOM_NAME_PARTS[Math.floor(rng() * ROOM_NAME_PARTS.length)];
+
+    rooms[cell.id] = {
+      id: cell.id,
+      name: `Depth ${depth} · ${namePart}`,
+      background: backgroundForDepth(depth, Math.floor(rng() * 5)),
+      exits,
+      coin: randomPosition(rng),
+      snake: generateSnake(depth, rng),
+    };
+  }
+
+  rooms[farthestRoomId].stairsDownTile = stairsTilePosition();
+
+  if (depth > 1) {
+    rooms[startId].stairsUpTile = stairsTilePosition();
+  }
+
+  if (depth === 1) {
+    rooms[startId].swordPickup = { ...SWORD_START_POSITION };
+    rooms[startId].snake = {
+      segments: [
+        { x: 560, y: 310 },
+        { x: 590, y: 310 },
+      ],
+      size: 24,
+      speed: 1.6,
+    };
+  }
+
+  return {
+    depth,
+    rooms,
+    startRoomId: startId,
+    stairsDownRoomId: farthestRoomId,
+  };
+}
+
+function ensureFloor(depth: number) {
+  if (!floors.has(depth)) {
+    floors.set(depth, generateFloor(depth, runSeed + depth * 9973));
+  }
+}
+
+function getCurrentFloor(): Floor {
+  return floors.get(currentDepth)!;
+}
+
+function getCurrentRoom(): Room {
+  return getCurrentFloor().rooms[currentRoomId];
+}
+
+function showFloorMessage(message: string) {
+  floorMessage = message;
+  floorMessageUntil = performance.now() + FLOOR_MESSAGE_MS;
+}
+
+function applyRoomState(room: Room) {
   coin.x = room.coin.x;
   coin.y = room.coin.y;
   snake.segments = room.snake.segments.map((segment) => ({ ...segment }));
@@ -222,6 +343,11 @@ function loadRoom(roomId: string) {
   snakeDeadUntil = 0;
   weapon.activeUntil = 0;
   weapon.lastAttackAt = 0;
+}
+
+function loadRoom(roomId: string) {
+  currentRoomId = roomId;
+  applyRoomState(getCurrentRoom());
 }
 
 function spawnFromDirection(direction: Direction) {
@@ -248,14 +374,71 @@ function changeRoom(roomId: string, enteredFrom: Direction) {
   spawnFromDirection(enteredFrom);
 }
 
+function spawnAtTile(tile: { x: number; y: number }, below: boolean) {
+  player.x = tile.x + STAIRS_TILE_SIZE / 2 - player.size / 2;
+  player.y = below ? tile.y + STAIRS_TILE_SIZE + 10 : tile.y - player.size - 10;
+  player.x = Math.max(8, Math.min(PLAY_WIDTH - player.size - 8, player.x));
+  player.y = Math.max(8, Math.min(PLAY_HEIGHT - player.size - 8, player.y));
+}
+
+function descendFloor() {
+  currentDepth += 1;
+  deepestDepth = Math.max(deepestDepth, currentDepth);
+  ensureFloor(currentDepth);
+
+  score += DESCEND_BONUS;
+  loadRoom(getCurrentFloor().startRoomId);
+
+  const startRoom = getCurrentRoom();
+
+  if (startRoom.stairsUpTile) {
+    spawnAtTile(startRoom.stairsUpTile, true);
+  } else {
+    spawnFromDirection("north");
+  }
+
+  stairsCooldownUntil = performance.now() + STAIRS_COOLDOWN_MS;
+  showFloorMessage(`Descended to Depth ${currentDepth}`);
+}
+
+function ascendFloor() {
+  if (currentDepth <= 1) {
+    return;
+  }
+
+  currentDepth -= 1;
+  loadRoom(getCurrentFloor().stairsDownRoomId);
+
+  const room = getCurrentRoom();
+
+  if (room.stairsDownTile) {
+    spawnAtTile(room.stairsDownTile, false);
+  } else {
+    spawnFromDirection("south");
+  }
+
+  stairsCooldownUntil = performance.now() + STAIRS_COOLDOWN_MS;
+  showFloorMessage(`Ascended to Depth ${currentDepth}`);
+}
+
 function resetGame() {
   score = 0;
   hp.current = hp.max;
   invincibleUntil = 0;
+  hasSword = false;
+  swordTutorialUntil = 0;
+  floorMessageUntil = 0;
+  floorMessage = "";
+  stairsCooldownUntil = 0;
   playerFacing = "east";
   player.x = 100;
   player.y = 100;
-  loadRoom("courtyard");
+  currentDepth = 1;
+  deepestDepth = 1;
+  runSeed = (Math.random() * 2 ** 31) >>> 0;
+  floors.clear();
+  ensureFloor(1);
+  loadRoom(getCurrentFloor().startRoomId);
   keys.clear();
 }
 
@@ -313,6 +496,10 @@ function slaySnake() {
 }
 
 function tryAttack() {
+  if (!hasSword) {
+    return;
+  }
+
   const now = performance.now();
 
   if (now < weapon.lastAttackAt + weapon.cooldownMs || !isSnakeAlive()) {
@@ -322,6 +509,32 @@ function tryAttack() {
   weapon.lastAttackAt = now;
   weapon.activeUntil = now + weapon.durationMs;
   checkWeaponHits();
+}
+
+function getSwordPickupPosition() {
+  return getCurrentRoom().swordPickup;
+}
+
+function tryPickupSword() {
+  if (hasSword) {
+    return;
+  }
+
+  const pickup = getSwordPickupPosition();
+
+  if (!pickup) {
+    return;
+  }
+
+  if (
+    boxesOverlap(
+      { x: player.x, y: player.y, w: player.size, h: player.size },
+      { x: pickup.x, y: pickup.y, w: SWORD_PICKUP_SIZE, h: SWORD_PICKUP_SIZE },
+    )
+  ) {
+    hasSword = true;
+    swordTutorialUntil = performance.now() + SWORD_TUTORIAL_MS;
+  }
 }
 
 function checkWeaponHits() {
@@ -392,9 +605,50 @@ function endGame() {
   state = "gameover";
   keys.clear();
   finalScoreEl.textContent = String(score);
+  finalDepthEl.textContent = String(deepestDepth);
 
   canvas.classList.add("hidden");
   gameOverEl.classList.remove("hidden");
+}
+
+function tryUseStairs() {
+  if (performance.now() < stairsCooldownUntil) {
+    return;
+  }
+
+  const room = getCurrentRoom();
+  const playerBox = { x: player.x, y: player.y, w: player.size, h: player.size };
+
+  if (room.stairsDownTile) {
+    const tile = room.stairsDownTile;
+
+    if (
+      boxesOverlap(playerBox, {
+        x: tile.x,
+        y: tile.y,
+        w: STAIRS_TILE_SIZE,
+        h: STAIRS_TILE_SIZE,
+      })
+    ) {
+      descendFloor();
+      return;
+    }
+  }
+
+  if (room.stairsUpTile) {
+    const tile = room.stairsUpTile;
+
+    if (
+      boxesOverlap(playerBox, {
+        x: tile.x,
+        y: tile.y,
+        w: STAIRS_TILE_SIZE,
+        h: STAIRS_TILE_SIZE,
+      })
+    ) {
+      ascendFloor();
+    }
+  }
 }
 
 function tryChangeRoom() {
@@ -439,6 +693,7 @@ function movePlayer() {
 
   updateFacing();
   tryChangeRoom();
+  tryUseStairs();
 
   player.x = Math.max(0, Math.min(PLAY_WIDTH - player.size, player.x));
   player.y = Math.max(0, Math.min(PLAY_HEIGHT - player.size, player.y));
@@ -547,6 +802,8 @@ function update() {
     score += 1;
     moveCoin();
   }
+
+  tryPickupSword();
 }
 
 function drawHpBar(x: number, y: number, width: number, height: number) {
@@ -591,19 +848,30 @@ function drawHud() {
   ctx.textAlign = "right";
   ctx.fillStyle = "#ccc";
   ctx.font = "18px Arial";
-  ctx.fillText(room.name, canvas.width - 20, 30);
+  ctx.fillText(`Depth ${currentDepth}`, canvas.width - 20, 30);
 
   ctx.textAlign = "left";
+  ctx.fillStyle = "#999";
+  ctx.font = "14px Arial";
+  ctx.fillText(room.name, 20, 48);
+
   ctx.fillStyle = "white";
   ctx.font = "16px Arial";
-  ctx.fillText("HP", 20, 58);
-  drawHpBar(48, 44, 160, 18);
+  ctx.fillText("HP", 280, 58);
+  drawHpBar(308, 44, 140, 18);
 
   const cooldownReady = performance.now() >= weapon.lastAttackAt + weapon.cooldownMs;
-  ctx.fillStyle = cooldownReady ? "#ff8844" : "#555";
   ctx.font = "14px Arial";
   ctx.textAlign = "right";
-  ctx.fillText(cooldownReady ? "Sword ready" : "Sword cooling...", canvas.width - 20, 58);
+
+  if (hasSword) {
+    ctx.fillStyle = cooldownReady ? "#ff8844" : "#555";
+    ctx.fillText(cooldownReady ? "Sword ready" : "Sword cooling...", canvas.width - 20, 58);
+  } else {
+    ctx.fillStyle = "#666";
+    ctx.fillText("No weapon equipped", canvas.width - 20, 58);
+  }
+
   ctx.textAlign = "left";
 }
 
@@ -632,6 +900,205 @@ function drawDoors(room: Room) {
   }
 }
 
+function drawStairsTiles(room: Room) {
+  if (room.stairsDownTile) {
+    const tile = room.stairsDownTile;
+    const screenY = tile.y + HUD_HEIGHT;
+
+    ctx.fillStyle = "rgba(180, 90, 255, 0.55)";
+    ctx.fillRect(tile.x, screenY, STAIRS_TILE_SIZE, STAIRS_TILE_SIZE);
+    ctx.strokeStyle = "#e0b0ff";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(tile.x, screenY, STAIRS_TILE_SIZE, STAIRS_TILE_SIZE);
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 14px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText("▼", tile.x + STAIRS_TILE_SIZE / 2, screenY + STAIRS_TILE_SIZE / 2 + 5);
+    ctx.font = "11px Arial";
+    ctx.fillText("Down", tile.x + STAIRS_TILE_SIZE / 2, screenY + STAIRS_TILE_SIZE + 14);
+    ctx.textAlign = "left";
+  }
+
+  if (room.stairsUpTile) {
+    const tile = room.stairsUpTile;
+    const screenY = tile.y + HUD_HEIGHT;
+
+    ctx.fillStyle = "rgba(120, 200, 255, 0.55)";
+    ctx.fillRect(tile.x, screenY, STAIRS_TILE_SIZE, STAIRS_TILE_SIZE);
+    ctx.strokeStyle = "#b0e0ff";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(tile.x, screenY, STAIRS_TILE_SIZE, STAIRS_TILE_SIZE);
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 14px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText("▲", tile.x + STAIRS_TILE_SIZE / 2, screenY + STAIRS_TILE_SIZE / 2 + 5);
+    ctx.font = "11px Arial";
+    ctx.fillText("Up", tile.x + STAIRS_TILE_SIZE / 2, screenY + STAIRS_TILE_SIZE + 14);
+    ctx.textAlign = "left";
+  }
+}
+
+function drawFacingIndicator(screenX: number, screenY: number) {
+  const nubSize = 10;
+  const offset = 2;
+
+  ctx.fillStyle = "#ffffff";
+
+  switch (playerFacing) {
+    case "east":
+      ctx.fillRect(
+        screenX + player.size + offset,
+        screenY + player.size / 2 - nubSize / 2,
+        nubSize,
+        nubSize,
+      );
+      break;
+    case "west":
+      ctx.fillRect(
+        screenX - offset - nubSize,
+        screenY + player.size / 2 - nubSize / 2,
+        nubSize,
+        nubSize,
+      );
+      break;
+    case "north":
+      ctx.fillRect(
+        screenX + player.size / 2 - nubSize / 2,
+        screenY - offset - nubSize,
+        nubSize,
+        nubSize,
+      );
+      break;
+    case "south":
+      ctx.fillRect(
+        screenX + player.size / 2 - nubSize / 2,
+        screenY + player.size + offset,
+        nubSize,
+        nubSize,
+      );
+      break;
+  }
+}
+
+function drawSwordPickup() {
+  const pickup = getSwordPickupPosition();
+
+  if (!pickup || hasSword) {
+    return;
+  }
+
+  const screenX = pickup.x;
+  const screenY = pickup.y + HUD_HEIGHT;
+  const pulse = Math.sin(performance.now() / 200) * 3;
+
+  ctx.fillStyle = "rgba(255, 136, 68, 0.25)";
+  ctx.fillRect(screenX - 6, screenY - 6 + pulse, SWORD_PICKUP_SIZE + 12, SWORD_PICKUP_SIZE + 12);
+
+  ctx.fillStyle = "#d0d0d0";
+  ctx.fillRect(screenX + 10, screenY + 2 + pulse, 8, 20);
+  ctx.fillStyle = "#8b4513";
+  ctx.fillRect(screenX + 6, screenY + 18 + pulse, 16, 6);
+
+  ctx.fillStyle = "#ff8844";
+  ctx.font = "13px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText("Sword — walk over to pick up", screenX + SWORD_PICKUP_SIZE / 2, screenY - 8 + pulse);
+  ctx.textAlign = "left";
+}
+
+function drawSwordTutorial() {
+  if (!hasSword || performance.now() >= swordTutorialUntil) {
+    return;
+  }
+
+  const bannerX = 60;
+  const bannerY = HUD_HEIGHT + 16;
+  const bannerWidth = PLAY_WIDTH - 120;
+  const bannerHeight = 64;
+
+  ctx.fillStyle = "rgba(0, 0, 0, 0.85)";
+  ctx.fillRect(bannerX, bannerY, bannerWidth, bannerHeight);
+
+  ctx.strokeStyle = "#ff8844";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(bannerX, bannerY, bannerWidth, bannerHeight);
+
+  ctx.fillStyle = "#ff8844";
+  ctx.font = "bold 20px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText("You found a sword!", PLAY_WIDTH / 2, bannerY + 26);
+
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "16px Arial";
+  ctx.fillText(
+    "Press SPACE to swing in the direction you're facing.",
+    PLAY_WIDTH / 2,
+    bannerY + 50,
+  );
+  ctx.textAlign = "left";
+}
+
+function drawFloorMessage() {
+  if (performance.now() >= floorMessageUntil) {
+    return;
+  }
+
+  const bannerX = 140;
+  const bannerY = HUD_HEIGHT + PLAY_HEIGHT / 2 - 24;
+  const bannerWidth = PLAY_WIDTH - 280;
+  const bannerHeight = 48;
+
+  ctx.fillStyle = "rgba(0, 0, 0, 0.8)";
+  ctx.fillRect(bannerX, bannerY, bannerWidth, bannerHeight);
+
+  ctx.strokeStyle = "#b45cff";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(bannerX, bannerY, bannerWidth, bannerHeight);
+
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 20px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText(floorMessage, PLAY_WIDTH / 2, bannerY + 30);
+  ctx.textAlign = "left";
+}
+
+function drawEquippedSwordIcon(screenX: number, screenY: number) {
+  if (!hasSword) {
+    return;
+  }
+
+  const iconX = screenX + player.size - 10;
+  const iconY = screenY + 4;
+
+  ctx.fillStyle = "#d0d0d0";
+  ctx.fillRect(iconX, iconY, 4, 12);
+  ctx.fillStyle = "#8b4513";
+  ctx.fillRect(iconX - 2, iconY + 10, 8, 3);
+}
+
+function drawWeaponSwing() {
+  if (!hasSword) {
+    return;
+  }
+
+  const now = performance.now();
+
+  if (now >= weapon.activeUntil) {
+    return;
+  }
+
+  const hitbox = getSwingHitbox();
+
+  ctx.fillStyle = "rgba(255, 120, 40, 0.8)";
+  ctx.fillRect(hitbox.x, hitbox.y + HUD_HEIGHT, hitbox.w, hitbox.h);
+
+  ctx.strokeStyle = "#fff";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(hitbox.x, hitbox.y + HUD_HEIGHT, hitbox.w, hitbox.h);
+}
+
 function draw() {
   const room = getCurrentRoom();
 
@@ -641,23 +1108,46 @@ function draw() {
   ctx.fillRect(0, HUD_HEIGHT, PLAY_WIDTH, PLAY_HEIGHT);
 
   drawDoors(room);
+  drawStairsTiles(room);
+  drawSwordPickup();
   drawHud();
 
+  const playerScreenX = player.x;
+  const playerScreenY = player.y + HUD_HEIGHT;
   const invincible = isPlayerInvincible();
   const showPlayer = !invincible || Math.floor(performance.now() / 100) % 2 === 0;
 
   if (showPlayer) {
     ctx.fillStyle = invincible ? "#ff6666" : "cyan";
-    ctx.fillRect(player.x, player.y + HUD_HEIGHT, player.size, player.size);
+    ctx.fillRect(playerScreenX, playerScreenY, player.size, player.size);
+    drawFacingIndicator(playerScreenX, playerScreenY);
+    drawEquippedSwordIcon(playerScreenX, playerScreenY);
   }
+
+  drawWeaponSwing();
+  drawSwordTutorial();
+  drawFloorMessage();
 
   ctx.fillStyle = "gold";
   ctx.fillRect(coin.x, coin.y + HUD_HEIGHT, coin.size, coin.size);
 
-  ctx.fillStyle = "lime";
+  if (isSnakeAlive()) {
+    ctx.fillStyle = "lime";
 
-  for (const segment of snake.segments) {
-    ctx.fillRect(segment.x, segment.y + HUD_HEIGHT, snake.size, snake.size);
+    for (const segment of snake.segments) {
+      ctx.fillRect(segment.x, segment.y + HUD_HEIGHT, snake.size, snake.size);
+    }
+  } else if (performance.now() < snakeDeadUntil) {
+    ctx.fillStyle = "white";
+    ctx.font = "18px Arial";
+    ctx.textAlign = "center";
+    const secondsLeft = Math.ceil((snakeDeadUntil - performance.now()) / 1000);
+    ctx.fillText(
+      `Snake respawns in ${secondsLeft}s`,
+      PLAY_WIDTH / 2,
+      HUD_HEIGHT + PLAY_HEIGHT / 2,
+    );
+    ctx.textAlign = "left";
   }
 }
 

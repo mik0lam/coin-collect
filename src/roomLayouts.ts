@@ -84,15 +84,15 @@ export const ROOM_LAYOUTS: RoomLayoutTemplate[] = [
     rows: [
       layoutRow("........................."),
       layoutRow("........................."),
-      layoutRow("...........####.........."),
-      layoutRow("...........####.........."),
-      layoutRow("...........#..#.........."),
+      layoutRow("...........#...#........."),
+      layoutRow("...........#...#........."),
+      layoutRow("...........#...#........."),
       layoutRow("........................."),
       layoutRow(".....####.......####....."),
-      layoutRow(".....#..#.......#..#....."),
+      layoutRow(".....#...#.....#...#....."),
       layoutRow("........................."),
-      layoutRow("...........#..#.........."),
-      layoutRow("...........####.........."),
+      layoutRow("...........#...#........."),
+      layoutRow("...........#...#........."),
       layoutRow("........................."),
       layoutRow("........................."),
     ],
@@ -103,15 +103,15 @@ export const ROOM_LAYOUTS: RoomLayoutTemplate[] = [
     rows: [
       layoutRow("........................."),
       layoutRow("........................."),
-      layoutRow(".............#..........."),
-      layoutRow(".............#..........."),
-      layoutRow(".............#..........."),
-      layoutRow(".............#..........."),
-      layoutRow(".............#..........."),
-      layoutRow(".............#..........."),
-      layoutRow(".............#..........."),
-      layoutRow(".............#..........."),
-      layoutRow(".............#..........."),
+      layoutRow(".............R..........."),
+      layoutRow(".............R..........."),
+      layoutRow("........................."),
+      layoutRow("........................."),
+      layoutRow("........................."),
+      layoutRow("........................."),
+      layoutRow("........................."),
+      layoutRow(".............R..........."),
+      layoutRow(".............R..........."),
       layoutRow("........................."),
       layoutRow("........................."),
     ],
@@ -159,17 +159,17 @@ export const ROOM_LAYOUTS: RoomLayoutTemplate[] = [
     label: "Rock Islands",
     rows: [
       layoutRow("........................."),
-      layoutRow("..RRR..............RRR..."),
-      layoutRow("..RRR..............RRR..."),
+      layoutRow("..RR..............RR....."),
+      layoutRow("..RR..............RR....."),
       layoutRow("........................."),
       layoutRow("........................."),
-      layoutRow(".........RRR............."),
-      layoutRow(".........RRR............."),
-      layoutRow(".........RRR............."),
+      layoutRow(".........RR.............."),
+      layoutRow(".........RR.............."),
       layoutRow("........................."),
       layoutRow("........................."),
-      layoutRow("..RRR..............RRR..."),
-      layoutRow("..RRR..............RRR..."),
+      layoutRow("..RR..............RR....."),
+      layoutRow("..RR..............RR....."),
+      layoutRow("........................."),
       layoutRow("........................."),
     ],
   },
@@ -207,7 +207,7 @@ export const ROOM_LAYOUTS: RoomLayoutTemplate[] = [
       layoutRow("....#............#......."),
       layoutRow("....#....PP......#......."),
       layoutRow("....#............#......."),
-      layoutRow("....##############......."),
+      layoutRow("....###.......###........"),
       layoutRow("........................."),
     ],
   },
@@ -221,6 +221,19 @@ export interface LayoutObstacle {
   w: number;
   h: number;
   kind: LayoutObstacleKind;
+  hp: number;
+  maxHp: number;
+}
+
+export function obstacleMaxHp(kind: LayoutObstacleKind) {
+  switch (kind) {
+    case "rock":
+      return 1;
+    case "wall":
+      return 2;
+    case "pillar":
+      return 4;
+  }
 }
 
 function boxesOverlap(
@@ -247,6 +260,135 @@ function cellToKind(cell: LayoutCell): LayoutObstacleKind | null {
     default:
       return null;
   }
+}
+
+export type LayoutDirection = "north" | "south" | "east" | "west";
+
+export const DOOR_TILE_COUNT = 2;
+export const DOOR_TILE_COL_START = Math.floor((LAYOUT_COLS - DOOR_TILE_COUNT) / 2);
+export const DOOR_TILE_ROW_START = Math.floor((LAYOUT_ROWS - DOOR_TILE_COUNT) / 2);
+export const DOOR_START_X = DOOR_TILE_COL_START * LAYOUT_TILE_SIZE;
+export const DOOR_START_Y = DOOR_TILE_ROW_START * LAYOUT_TILE_SIZE;
+export const DOOR_LENGTH = DOOR_TILE_COUNT * LAYOUT_TILE_SIZE;
+export const DOOR_APPROACH_DEPTH = LAYOUT_TILE_SIZE * 3;
+export const DOOR_APPROACH_PAD = LAYOUT_TILE_SIZE;
+
+export function getDoorClearZones(
+  exits: Partial<Record<LayoutDirection, string>> = {
+    north: "any",
+    south: "any",
+    east: "any",
+    west: "any",
+  },
+) {
+  const pad = DOOR_APPROACH_PAD;
+  const zones: { x: number; y: number; w: number; h: number }[] = [];
+
+  if (exits.north) {
+    zones.push({
+      x: DOOR_START_X - pad,
+      y: 0,
+      w: DOOR_LENGTH + pad * 2,
+      h: DOOR_APPROACH_DEPTH,
+    });
+  }
+
+  if (exits.south) {
+    zones.push({
+      x: DOOR_START_X - pad,
+      y: LAYOUT_ROWS * LAYOUT_TILE_SIZE - DOOR_APPROACH_DEPTH,
+      w: DOOR_LENGTH + pad * 2,
+      h: DOOR_APPROACH_DEPTH,
+    });
+  }
+
+  if (exits.west) {
+    zones.push({
+      x: 0,
+      y: DOOR_START_Y - pad,
+      w: DOOR_APPROACH_DEPTH,
+      h: DOOR_LENGTH + pad * 2,
+    });
+  }
+
+  if (exits.east) {
+    zones.push({
+      x: LAYOUT_COLS * LAYOUT_TILE_SIZE - DOOR_APPROACH_DEPTH,
+      y: DOOR_START_Y - pad,
+      w: DOOR_APPROACH_DEPTH,
+      h: DOOR_LENGTH + pad * 2,
+    });
+  }
+
+  return zones;
+}
+
+function cloneLayoutRows(rows: string[]) {
+  return Array.from({ length: LAYOUT_ROWS }, (_, row) => {
+    const line = rows[row] ?? ".".repeat(LAYOUT_COLS);
+    const chars = line.split("");
+
+    while (chars.length < LAYOUT_COLS) {
+      chars.push(".");
+    }
+
+    return chars.slice(0, LAYOUT_COLS);
+  });
+}
+
+export function clearDoorCorridors(
+  layout: RoomLayoutTemplate,
+  exits: Partial<Record<LayoutDirection, string>>,
+): RoomLayoutTemplate {
+  const rows = cloneLayoutRows(layout.rows);
+  const colStart = DOOR_TILE_COL_START;
+  const colEnd = colStart + DOOR_TILE_COUNT;
+  const rowStart = DOOR_TILE_ROW_START;
+  const rowEnd = rowStart + DOOR_TILE_COUNT;
+  const corridorDepth = 3;
+
+  const clearRect = (r0: number, r1: number, c0: number, c1: number) => {
+    for (let row = r0; row < r1; row++) {
+      for (let col = c0; col < c1; col++) {
+        if (row >= 0 && row < rows.length && col >= 0 && col < rows[row].length) {
+          rows[row][col] = ".";
+        }
+      }
+    }
+  };
+
+  if (exits.north) {
+    clearRect(0, corridorDepth, colStart - 1, colEnd + 1);
+  }
+
+  if (exits.south) {
+    clearRect(LAYOUT_ROWS - corridorDepth, LAYOUT_ROWS, colStart - 1, colEnd + 1);
+  }
+
+  if (exits.west) {
+    clearRect(rowStart - 1, rowEnd + 1, 0, corridorDepth);
+  }
+
+  if (exits.east) {
+    clearRect(rowStart - 1, rowEnd + 1, LAYOUT_COLS - corridorDepth, LAYOUT_COLS);
+  }
+
+  return {
+    ...layout,
+    rows: rows.map((line) => layoutRow(line.join(""))),
+  };
+}
+
+export function obstacleHitbox(obstacle: LayoutObstacle) {
+  const inset =
+    obstacle.kind === "wall" ? 0 : obstacle.kind === "pillar" ? 5 : 9;
+
+  return {
+    x: obstacle.x + inset,
+    y: obstacle.y + inset,
+    w: obstacle.w - inset * 2,
+    h: obstacle.h - inset * 2,
+  };
 }
 
 export function pickRoomLayout(rng: () => number, isStartRoom: boolean) {
@@ -279,6 +421,8 @@ export function layoutToObstacles(
         w: LAYOUT_TILE_SIZE,
         h: LAYOUT_TILE_SIZE,
         kind,
+        hp: obstacleMaxHp(kind),
+        maxHp: obstacleMaxHp(kind),
       };
 
       if (blocked.some((zone) => boxesOverlap(obstacle, zone))) {

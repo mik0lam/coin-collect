@@ -46,10 +46,13 @@ const BRUTE = { o: "#ffa840", O: "#e07018", r: "#903808", R: "#602004" };
 const POTION = { u: "#a868ff", U: "#7838d8", c: "#f0e0ff", C: "#d8c0ff" };
 const STRONG = { f: "#ff70cc", F: "#e03098", H: "#ffe8f8" };
 const CHEST = { n: "#d0a020", N: "#a07818", x: "#7a5028", X: "#503018", L: "#ffd860" };
-const DOOR = { y: "#ffd860", Y: "#d0a820", q: "#a07810" };
-const STAIRS_DOWN = { v: "#d080ff", V: "#9840d8", i: "#f0d0ff" };
-const STAIRS_UP = { T: "#78d0ff", t: "#3898e0", Q: "#d8f4ff" };
-const FLOOR = { F: "#1c1c28", f: "#262634", s: "#14141c" };
+const DOOR = { y: "#5a4030", Y: "#3a2818", q: "#2a1810", w: "#6a5040", W: "#4a3828" };
+const STAIRS_DOWN = { v: "#c84848", V: "#882828", i: "#f0a0a0", b: "#3a1818" };
+const STAIRS_UP = { T: "#88b8d8", t: "#4878a8", Q: "#d8ecf8" };
+const FLOOR = { D: "#1a1410", d: "#241c16", m: "#342820", M: "#443428", l: "#544438", s: "#18120e" };
+const FLOOR_BLOOD = { ...FLOOR, b: "#4a1818", B: "#6a2020", r: "#3a1010" };
+const FLOOR_CRACK = { ...FLOOR, c: "#14100c", C: "#0e0a08", k: "#2e241c" };
+const STONE = { z: "#3a3028", Z: "#4a4034", W: "#5a5044", q: "#2a2218", Q: "#1e1814" };
 
 const playerEast = buildSprite(
   [
@@ -405,13 +408,17 @@ const daggerSprite = buildSprite(
 
 const doorSprite = buildSprite(
   [
-    "yyyyyyyyyyyyyyyyyy",
-    "yYYYYYYYYYYYYYYYYy",
-    "yYqqqqqqqqqqqqqqYy",
-    "yYqqqqqqqqqqqqqqYy",
-    "yYqqqqqqqqqqqqqqYy",
-    "yYYYYYYYYYYYYYYYYy",
-    "yyyyyyyyyyyyyyyyyy",
+    "wwwwwwwwwwwwwwwwww",
+    "wWWWWWWWWWWWWWWWWw",
+    "wWyyyyyyyyyyyyyyWw",
+    "wWyYYYYYYYYYYYYyWw",
+    "wWyYqqqqqqqqqqYyWw",
+    "wWyYqqqqqqqqqqYyWw",
+    "wWyYqqqqqqqqqqYyWw",
+    "wWyYYYYYYYYYYYYyWw",
+    "wWyyyyyyyyyyyyyyWw",
+    "wWWWWWWWWWWWWWWWWw",
+    "wwwwwwwwwwwwwwwwww",
   ],
   DOOR,
 );
@@ -448,24 +455,221 @@ const stairsUp = buildSprite(
 
 const floorTile = buildSprite(
   [
-    "FFFFFFFFFFFFFFFF",
-    "FffsffsffsffsffF",
-    "FFFFFFFFFFFFFFFF",
-    "FffsffsffsffsffF",
-    "FFFFFFFFFFFFFFFF",
-    "FffsffsffsffsffF",
-    "FFFFFFFFFFFFFFFF",
-    "FffsffsffsffsffF",
-    "FFFFFFFFFFFFFFFF",
-    "FffsffsffsffsffF",
-    "FFFFFFFFFFFFFFFF",
-    "FffsffsffsffsffF",
-    "FFFFFFFFFFFFFFFF",
-    "FffsffsffsffsffF",
-    "FFFFFFFFFFFFFFFF",
-    "FffsffsffsffsffF",
+    "dddddddddddddddd",
+    "dmmlmmmlmmmlmmmd",
+    "dmlMlmMlmMlmMlmM",
+    "dmmlmmmlmmmlmmmd",
+    "dmlMlmMlmMlmMlmM",
+    "dmmlmmmlmmmlmmmd",
+    "dmlMlmMlmMlmMlmM",
+    "dmmlmmmlmmmlmmmd",
+    "dmlMlmMlmMlmMlmM",
+    "dmmlmmmlmmmlmmmd",
+    "dmlMlmMlmMlmMlmM",
+    "dmmlmmmlmmmlmmmd",
+    "dmlMlmMlmMlmMlmM",
+    "dmmlmmmlmmmlmmmd",
+    "dmlMlmMlmMlmMlmM",
+    "dddddddddddddddd",
   ],
   FLOOR,
+);
+
+const floorTileSpeckled = buildSprite(
+  [
+    "dddddddddddddddd",
+    "dssmsssmsssmsssd",
+    "dsmMlsMlsMlsMlsM",
+    "dssmsssmsssmsssd",
+    "dsmMlsMlsMlsMlsM",
+    "dssmsssmsssmsssd",
+    "dsmMlsMlsMlsMlsM",
+    "dssmsssmsssmsssd",
+    "dsmMlsMlsMlsMlsM",
+    "dssmsssmsssmsssd",
+    "dsmMlsMlsMlsMlsM",
+    "dssmsssmsssmsssd",
+    "dsmMlsMlsMlsMlsM",
+    "dssmsssmsssmsssd",
+    "dsmMlsMlsMlsMlsM",
+    "dddddddddddddddd",
+  ],
+  FLOOR,
+);
+
+const floorTileBlood = buildSprite(
+  [
+    "dddddddddddddddd",
+    "dmmlmmmlmmmlmmmd",
+    "dmlMlmMlmMlmMlmM",
+    "dmmlmmmlmmmlmmmd",
+    "dmlMlmMbbbblmMlm",
+    "dmmlmmmbBBbmmmd",
+    "dmlMlmMbbbblmMlm",
+    "dmmlmmmlmmmlmmmd",
+    "dmlMlmMlmMlmMlmM",
+    "dmmlmmmlmmmlmmmd",
+    "dmlMlmMlmMlmMlmM",
+    "dmmlmmmlmmmlmmmd",
+    "dmlMlmMlmMlmMlmM",
+    "dmmlmmmlmmmlmmmd",
+    "dmlMlmMlmMlmMlmM",
+    "dddddddddddddddd",
+  ],
+  FLOOR_BLOOD,
+);
+
+const floorTileCracked = buildSprite(
+  [
+    "dddddddddddddddd",
+    "dmmlmmmlmmmlmmmd",
+    "dmlMlmCklmMlmMlm",
+    "dmmlmmkCklmmlmmmd",
+    "dmlMlmMcklmMlmMlm",
+    "dmmlmmmlCklmmlmmmd",
+    "dmlMlmMlmMlmMlmM",
+    "dmmlmmmlmmmlmmmd",
+    "dmlMlmMlmMlmMlmM",
+    "dmmlmmmlmmmlmmmd",
+    "dmlMlmMlmMlmMlmM",
+    "dmmlmmmlmmmlmmmd",
+    "dmlMlmMlmMlmMlmM",
+    "dmmlmmmlmmmlmmmd",
+    "dmlMlmMlmMlmMlmM",
+    "dddddddddddddddd",
+  ],
+  FLOOR_CRACK,
+);
+
+export const FLOOR_TILES = [floorTile, floorTileSpeckled, floorTileBlood, floorTileCracked];
+
+const VOID = { v: "#68e8f0", V: "#38b8d0", i: "#c8f8ff", p: "#9040e8", P: "#c070ff", d: "#281848" };
+
+const voidShardSprite = buildSprite(
+  [
+    "......dddd......",
+    "....ddPPPPdd....",
+    "...ddPViiVPdd...",
+    "..ddPViiiiVPdd..",
+    ".ddPViiVViiVPdd.",
+    ".ddPViVVVViVPdd.",
+    ".ddPViVVVViVPdd.",
+    "..ddPViiiiVPdd..",
+    "...ddPViiVPdd...",
+    "....ddPPPPdd....",
+    "......dddd......",
+  ],
+  VOID,
+);
+
+const slotMachineSprite = buildSprite(
+  [
+    "....rrrrrrrr....",
+    "...rRRRRRRRRr...",
+    "..rRbbbbbbbbRr..",
+    ".rRbyyyyyyyybRr.",
+    ".rRbyGGGGGGybRr.",
+    ".rRbyGggggGybRr.",
+    ".rRbyGGGGGGybRr.",
+    ".rRbyyyyyyyybRr.",
+    ".rRbbbbbbbbbbRr.",
+    "..rRRRRRRRRRRr..",
+    "...rRRnnnnRRr...",
+    "....rrrrrrrr....",
+    "...nnnnnnnnnn...",
+    "..nnnnnnnnnnnn..",
+  ],
+  mergePalettes({ r: "#5a1818", R: "#7a2828" }, GOLD, { b: "#2a2018", y: "#ffd860", Y: "#e8b020", G: "#44cc44", g: "#228822", n: "#1a1410" }),
+);
+
+const LEGENDARY = { L: "#ffd860", l: "#e8b020", u: "#c070ff", U: "#9040e8", w: "#f0e8ff" };
+
+const soulreaverSprite = buildSprite(
+  [
+    ".........uuu......",
+    "........uUUu......",
+    ".......uULuU......",
+    "......uULLuU......",
+    ".....uULLLuU......",
+    "....uULLLLuU......",
+    "...uULLLLLuU......",
+    "..uULLLLLLuU......",
+    ".uULLLLLLLuU......",
+    "uULLLLLLLLuU......",
+    "bbbbbbbbbbbb......",
+    ".bbbbbbbbbb.......",
+    "..bbbbbbbb........",
+    "...bbbbbb.........",
+    "....bbbb..........",
+    ".....bb...........",
+  ],
+  mergePalettes(METAL, LEATHER, LEGENDARY),
+);
+
+const stormCleaverSprite = buildSprite(
+  [
+    "......oooooooo......",
+    ".....oLLLLLLLo.....",
+    "....oLLLLLLLLLo....",
+    "...oLLLLllLLLLLo...",
+    "....oLLLLLLLLLo.....",
+    ".....oLLLLLLLo......",
+    "......bbbbbb........",
+    "......bbbbbb........",
+    ".......bbbb.........",
+    ".......bbbb.........",
+    "........bb..........",
+    "........bb..........",
+    "........bb..........",
+    ".........b..........",
+    ".........b..........",
+    "....................",
+  ],
+  mergePalettes(BRUTE, LEATHER, LEGENDARY),
+);
+
+const bloodReaperSprite = buildSprite(
+  [
+    ".........lll......",
+    "........lLLl......",
+    ".......lLLLl......",
+    "......lLLLLl......",
+    ".....lLLLLLl......",
+    "....lLLLLLLl......",
+    "...lLLLLLLLl......",
+    "..lLLLLLLLLl......",
+    ".lLLLLLLLLLl......",
+    "lLLLLLLLLLLl......",
+    "bbbbbbbbbbbb......",
+    ".bbbbbbbbbb.......",
+    "..bbbbbbbb........",
+    "...bbbbbb.........",
+    "....bbbb..........",
+    ".....bb...........",
+  ],
+  mergePalettes(METAL, LEATHER, { L: "#cc3030", l: "#ff6060" }, LEGENDARY),
+);
+
+const phantomBladeSprite = buildSprite(
+  [
+    "........uu........",
+    ".......uuu........",
+    "......uuuu........",
+    ".....uuuuu........",
+    "....uuuuuu........",
+    "...uuuuuuu........",
+    "..uuuuuuuu........",
+    "...bbbbbb.........",
+    "...bbbbbb.........",
+    "..bbbbbb..........",
+    "..bbbb............",
+    "..bbbb............",
+    "...bb.............",
+    "...bb.............",
+    "....b.............",
+    "....................",
+  ],
+  mergePalettes(METAL, LEATHER, LEGENDARY),
 );
 
 const rockSprite = buildSprite(
@@ -473,61 +677,61 @@ const rockSprite = buildSprite(
     "......zzzzzz......",
     "....zzZZZZzz....",
     "...zzZZWWZZzz...",
-    "..zzZZWWWWZZzz..",
-    ".zzZZWWWWWWZZzz.",
-    ".zzZZWWWWWWZZzz.",
+    "..zzZZqqWWZZzz..",
+    ".zzZZqqqqWWZZzz.",
+    ".zzZZqqqqWWZZzz.",
     "..zzZZWWWWZZzz..",
     "...zzZZWWZZzz...",
     "....zzZZZZzz....",
     "......zzzzzz......",
   ],
-  { z: "#686878", Z: "#888898", W: "#a0a0b0" },
+  STONE,
 );
 
 const wallSprite = buildSprite(
   [
-    "zzZZzzZZzzZZzzZZzz",
-    "ZZzzZZzzZZzzZZzzZZ",
-    "zzZZzzZZzzZZzzZZzz",
-    "ZZzzZZzzZZzzZZzzZZ",
-    "zzZZzzZZzzZZzzZZzz",
-    "ZZzzZZzzZZzzZZzzZZ",
-    "zzZZzzZZzzZZzzZZzz",
-    "ZZzzZZzzZZzzZZzzZZ",
-    "zzZZzzZZzzZZzzZZzz",
-    "ZZzzZZzzZZzzZZzzZZ",
-    "zzZZzzZZzzZZzzZZzz",
-    "ZZzzZZzzZZzzZZzzZZ",
-    "zzZZzzZZzzZZzzZZzz",
-    "ZZzzZZzzZZzzZZzzZZ",
-    "zzZZzzZZzzZZzzZZzz",
-    "ZZzzZZzzZZzzZZzzZZ",
-    "zzZZzzZZzzZZzzZZzz",
-    "ZZzzZZzzZZzzZZzzZZ",
+    "QQqqQQqqQQqqQQqq",
+    "qZZzzZZzzZZzzZZq",
+    "qZzzzzzzzzzzzzZq",
+    "qZzzzzzzzzzzzzZq",
+    "qZzzzzzzzzzzzzZq",
+    "QQqqQQqqQQqqQQqq",
+    "qZZzzZZzzZZzzZZq",
+    "qZzzzzzzzzzzzzZq",
+    "qZzzzzzzzzzzzzZq",
+    "qZzzzzzzzzzzzzZq",
+    "QQqqQQqqQQqqQQqq",
+    "qZZzzZZzzZZzzZZq",
+    "qZzzzzzzzzzzzzZq",
+    "qZzzzzzzzzzzzzZq",
+    "qZzzzzzzzzzzzzZq",
+    "QQqqQQqqQQqqQQqq",
+    "qZZzzZZzzZZzzZZq",
+    "qZzzzzzzzzzzzzZq",
   ],
-  { z: "#4a4038", Z: "#5c5048" },
+  STONE,
 );
 
 const pillarSprite = buildSprite(
   [
-    "......bbbb......",
-    ".....bbbbbb.....",
-    "....bbbbbbbb....",
-    "...bbbbbbbbbb...",
-    "...bbbbbbbbbb...",
-    "...bbbbbbbbbb...",
-    "...bbbbbbbbbb...",
-    "...bbbbbbbbbb...",
-    "...bbbbbbbbbb...",
-    "...bbbbbbbbbb...",
-    "....bbbbbbbb....",
-    ".....bbbbbb.....",
-    "......bbbb......",
-    ".....bbbbbb.....",
-    "....bbbbbbbb....",
-    "...bbbbbbbbbb...",
+    "......QQQQ......",
+    ".....QZZZQ.....",
+    "....QZZZZZQ....",
+    "...QZZZZZZZQ...",
+    "...QZZzzZZZQ...",
+    "...QZZzzZZZQ...",
+    "...QZZzzZZZQ...",
+    "...QZZzzZZZQ...",
+    "...QZZzzZZZQ...",
+    "...QZZZZZZZQ...",
+    "....QZZZZZQ....",
+    ".....QZZZQ.....",
+    "......QQQQ......",
+    ".....QZZZQ.....",
+    "....QZZZZZQ....",
+    "...QZZZZZZZQ...",
   ],
-  mergePalettes(LEATHER, { z: "#5a5048", Z: "#787068" }),
+  STONE,
 );
 
 export const SPRITES: SpriteSheet = {
@@ -536,6 +740,8 @@ export const SPRITES: SpriteSheet = {
   playerNorth,
   playerSouth,
   coin: coinSprite,
+  voidShard: voidShardSprite,
+  slotMachine: slotMachineSprite,
   snakeHead,
   snakeBody,
   slime: slimeSprite,
@@ -549,6 +755,10 @@ export const SPRITES: SpriteSheet = {
   ironSword,
   warAxe,
   dagger: daggerSprite,
+  soulreaver: soulreaverSprite,
+  "storm-cleaver": stormCleaverSprite,
+  "blood-reaper": bloodReaperSprite,
+  "phantom-blade": phantomBladeSprite,
   door: doorSprite,
   stairsDown,
   stairsUp,
@@ -556,15 +766,47 @@ export const SPRITES: SpriteSheet = {
   rock: rockSprite,
   pillar: pillarSprite,
   wall: wallSprite,
+  wallTop: wallSprite,
+  wallTopAlt: wallSprite,
+  wallBottom: wallSprite,
+  wallLeft: wallSprite,
+  wallRight: wallSprite,
+  wallCornerTL: wallSprite,
+  wallCornerTR: wallSprite,
+  wallCornerBL: wallSprite,
+  wallCornerBR: wallSprite,
 };
 
-export type WeaponSpriteId = "rusty-sword" | "iron-sword" | "war-axe" | "dagger";
+export function applySpriteOverrides(
+  overrides: Partial<SpriteSheet>,
+  floorTiles?: HTMLCanvasElement[],
+) {
+  Object.assign(SPRITES, overrides);
+
+  if (floorTiles && floorTiles.length > 0) {
+    FLOOR_TILES.splice(0, FLOOR_TILES.length, ...floorTiles);
+  }
+}
+
+export type WeaponSpriteId =
+  | "rusty-sword"
+  | "iron-sword"
+  | "war-axe"
+  | "dagger"
+  | "soulreaver"
+  | "storm-cleaver"
+  | "blood-reaper"
+  | "phantom-blade";
 
 const WEAPON_SPRITE_MAP: Record<WeaponSpriteId, HTMLCanvasElement> = {
   "rusty-sword": rustySword,
   "iron-sword": ironSword,
   "war-axe": warAxe,
   dagger: daggerSprite,
+  soulreaver: soulreaverSprite,
+  "storm-cleaver": stormCleaverSprite,
+  "blood-reaper": bloodReaperSprite,
+  "phantom-blade": phantomBladeSprite,
 };
 
 export function getWeaponSprite(weaponId: WeaponSpriteId) {

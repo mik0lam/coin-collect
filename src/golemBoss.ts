@@ -7,6 +7,7 @@ import {
   getRockProjectileSprite,
   GOLEM_ANIMS,
   GOLEM_DRAW_SIZE,
+  GOLEM_SCALE,
   type GolemAnimKey,
 } from "./golemSprites";
 import type { GolemBossState, RuntimeMob } from "./types";
@@ -34,6 +35,12 @@ export interface GolemLaserBeam {
   damage: number;
 }
 
+const LASER_BEAM_FRAME = 12;
+const ROCK_SIZE_LARGE = Math.round(36 * GOLEM_SCALE);
+const ROCK_SIZE_SMALL = Math.round(28 * GOLEM_SCALE);
+const LASER_WIDTH = Math.round(34 * GOLEM_SCALE);
+const LASER_LENGTH = 540;
+
 let rocks: GolemRockProjectile[] = [];
 let lasers: GolemLaserBeam[] = [];
 
@@ -50,6 +57,7 @@ export function createGolemBossState(): GolemBossState {
     attackTriggered: false,
     deathHandled: false,
     hurtUntil: 0,
+    aimAngle: 0,
   };
 }
 
@@ -82,6 +90,21 @@ function golemCenter(mob: RuntimeMob) {
     x: head.x + mob.size / 2,
     y: head.y + mob.size / 2,
   };
+}
+
+function lockAimAtPlayer(
+  state: GolemBossState,
+  mob: RuntimeMob,
+  playerX: number,
+  playerY: number,
+  playerSize: number,
+) {
+  const center = golemCenter(mob);
+  const pcx = playerX + playerSize / 2;
+  const pcy = playerY + playerSize / 2;
+
+  state.aimAngle = Math.atan2(pcy - center.y, pcx - center.x);
+  state.facingRight = Math.cos(state.aimAngle) >= 0;
 }
 
 function playerBoxOverlaps(
@@ -133,55 +156,52 @@ function playerHitsLaser(
   return distSq <= half * half;
 }
 
-function spawnRock(mob: RuntimeMob, state: GolemBossState, playerX: number, playerY: number, playerSize: number) {
+function spawnRock(mob: RuntimeMob, state: GolemBossState) {
   const center = golemCenter(mob);
-  const pcx = playerX + playerSize / 2;
-  const pcy = playerY + playerSize / 2;
-  const dx = pcx - center.x;
-  const dy = pcy - center.y;
-  const dist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+  const angle = state.aimAngle;
   const speed = 5.2;
+  const offset = Math.round(28 * GOLEM_SCALE);
 
   rocks.push({
-    x: center.x - 18,
-    y: center.y - 28,
-    vx: (dx / dist) * speed,
-    vy: (dy / dist) * speed,
+    x: center.x + Math.cos(angle) * offset * 0.4 - Math.sin(angle) * 12,
+    y: center.y + Math.sin(angle) * offset * 0.4 + Math.cos(angle) * 12,
+    vx: Math.cos(angle) * speed,
+    vy: Math.sin(angle) * speed,
     rotation: 0,
     spin: 0.22,
-    size: 36,
+    size: ROCK_SIZE_LARGE,
     kind: Math.random() < 0.45 ? "arm" : "rock",
   });
 
   rocks.push({
-    x: center.x + 18,
-    y: center.y - 28,
-    vx: (dx / dist) * speed * 0.92 + (Math.random() - 0.5) * 0.8,
-    vy: (dy / dist) * speed * 0.92,
+    x: center.x + Math.cos(angle) * offset * 0.2 + Math.sin(angle) * 16,
+    y: center.y + Math.sin(angle) * offset * 0.2 - Math.cos(angle) * 16,
+    vx: Math.cos(angle) * speed * 0.92 + -Math.sin(angle) * 0.6,
+    vy: Math.sin(angle) * speed * 0.92 + Math.cos(angle) * 0.6,
     rotation: Math.random() * Math.PI,
     spin: -0.18,
-    size: 28,
+    size: ROCK_SIZE_SMALL,
     kind: "rock",
   });
 
   state.attackTriggered = true;
 }
 
-function spawnLaser(mob: RuntimeMob, playerX: number, playerY: number, playerSize: number) {
+function spawnLaser(mob: RuntimeMob, state: GolemBossState) {
   const center = golemCenter(mob);
-  const pcx = playerX + playerSize / 2;
-  const pcy = playerY + playerSize / 2;
   const now = performance.now();
+  const muzzleX = center.x + Math.cos(state.aimAngle) * Math.round(36 * GOLEM_SCALE);
+  const muzzleY = center.y + Math.sin(state.aimAngle) * Math.round(36 * GOLEM_SCALE);
 
   lasers.push({
-    originX: center.x,
-    originY: center.y - 8,
-    angle: Math.atan2(pcy - center.y, pcx - center.x),
-    length: 460,
-    width: 34,
+    originX: muzzleX,
+    originY: muzzleY,
+    angle: state.aimAngle,
+    length: LASER_LENGTH,
+    width: LASER_WIDTH,
     startedAt: now,
-    telegraphUntil: now + 280,
-    activeUntil: now + 1100,
+    telegraphUntil: now + 480,
+    activeUntil: now + 1200,
     damage: Math.floor(mob.contactDamage * 1.15),
   });
 }
@@ -203,6 +223,7 @@ export function startGolemDeath(state: GolemBossState) {
   state.attackTriggered = false;
   setAnim(state, "death");
   rocks = [];
+  lasers = [];
 }
 
 export function isGolemDying(state: GolemBossState) {
@@ -238,7 +259,9 @@ export function updateGolemBoss(
   const pcy = playerY + playerSize / 2;
   const now = performance.now();
 
-  state.facingRight = pcx >= center.x;
+  if (state.phase !== "laser" && state.phase !== "throw") {
+    state.facingRight = pcx >= center.x;
+  }
 
   for (let i = rocks.length - 1; i >= 0; i--) {
     const rock = rocks[i];
@@ -286,7 +309,7 @@ export function updateGolemBoss(
     const frame = getAnimFrameIndex(state, false);
 
     if (frame >= 7 && !state.attackTriggered) {
-      spawnLaser(mob, playerX, playerY, playerSize);
+      spawnLaser(mob, state);
       state.attackTriggered = true;
     }
 
@@ -304,7 +327,7 @@ export function updateGolemBoss(
     const frame = getAnimFrameIndex(state, false);
 
     if (frame >= 6 && !state.attackTriggered) {
-      spawnRock(mob, state, playerX, playerY, playerSize);
+      spawnRock(mob, state);
     }
 
     if (frame >= GOLEM_ANIMS.throw.frames - 1) {
@@ -322,6 +345,7 @@ export function updateGolemBoss(
     state.phase = useLaser ? "laser" : "throw";
     state.phaseStartedAt = now;
     state.attackTriggered = false;
+    lockAimAtPlayer(state, mob, playerX, playerY, playerSize);
     setAnim(state, useLaser ? "laser" : "throw");
     return;
   }
@@ -329,8 +353,9 @@ export function updateGolemBoss(
   const dx = pcx - center.x;
   const dy = pcy - center.y;
   const dist = Math.sqrt(dx * dx + dy * dy);
+  const stopDistance = Math.round(96 * GOLEM_SCALE);
 
-  if (dist > 96) {
+  if (dist > stopDistance) {
     head.x += (dx / dist) * mob.speed;
     head.y += (dy / dist) * mob.speed;
     clamp(mob);
@@ -378,33 +403,65 @@ export function drawGolemBoss(
   ctx.restore();
 }
 
+function drawLaserTelegraph(
+  ctx: CanvasRenderingContext2D,
+  laser: GolemLaserBeam,
+  now: number,
+) {
+  const elapsed = now - laser.startedAt;
+  const chargeFrame = Math.min(7, Math.floor(elapsed / 60));
+  const chargeSprite = getLaserFrame(chargeFrame);
+  const chargeSize = Math.round(48 * GOLEM_SCALE);
+
+  ctx.save();
+  ctx.translate(laser.originX, laser.originY);
+  ctx.rotate(laser.angle);
+  ctx.globalAlpha = 0.65 + Math.sin(now / 70) * 0.15;
+  drawSprite(ctx, chargeSprite, -chargeSize / 2, -chargeSize / 2, chargeSize, chargeSize);
+
+  ctx.strokeStyle = "rgba(120, 220, 255, 0.55)";
+  ctx.lineWidth = 3;
+  ctx.setLineDash([10, 8]);
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(laser.length, 0);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+function drawLaserBeam(ctx: CanvasRenderingContext2D, laser: GolemLaserBeam) {
+  const beamSprite = getLaserFrame(LASER_BEAM_FRAME);
+  const beamThickness = Math.max(beamSprite.height, Math.round(28 * GOLEM_SCALE));
+
+  ctx.save();
+  ctx.translate(laser.originX, laser.originY);
+  ctx.rotate(laser.angle);
+  ctx.globalAlpha = 0.95;
+
+  drawSprite(ctx, beamSprite, 0, -beamThickness / 2, laser.length, beamThickness);
+
+  ctx.fillStyle = "rgba(120, 220, 255, 0.42)";
+  ctx.fillRect(0, -laser.width / 2, laser.length, laser.width);
+
+  ctx.fillStyle = "rgba(220, 245, 255, 0.55)";
+  ctx.fillRect(0, -Math.round(laser.width * 0.18), laser.length, Math.round(laser.width * 0.36));
+
+  ctx.restore();
+}
+
 export function drawGolemEffects(ctx: CanvasRenderingContext2D) {
   const now = performance.now();
 
   for (const laser of lasers) {
-    const elapsed = now - laser.startedAt;
     const telegraph = now < laser.telegraphUntil;
     const active = now >= laser.telegraphUntil && now < laser.activeUntil;
-    const frameIndex = telegraph
-      ? Math.min(7, Math.floor(elapsed / 35))
-      : 8 + Math.min(5, Math.floor((now - laser.telegraphUntil) / 70));
-    const beamSprite = getLaserFrame(frameIndex);
-
-    ctx.save();
-    ctx.translate(laser.originX, laser.originY);
-    ctx.rotate(laser.angle);
 
     if (telegraph) {
-      ctx.globalAlpha = 0.55 + Math.sin(now / 60) * 0.15;
-      drawSprite(ctx, beamSprite, -8, -beamSprite.height / 2, 72, beamSprite.height);
+      drawLaserTelegraph(ctx, laser, now);
     } else if (active) {
-      ctx.globalAlpha = 0.92;
-      drawSprite(ctx, beamSprite, -4, -beamSprite.height / 2, laser.length * 0.55, beamSprite.height);
-      ctx.fillStyle = "rgba(120, 220, 255, 0.35)";
-      ctx.fillRect(0, -laser.width / 2, laser.length, laser.width);
+      drawLaserBeam(ctx, laser);
     }
-
-    ctx.restore();
   }
 
   for (const rock of rocks) {

@@ -1,21 +1,24 @@
 import { SPRITES } from "./sprites";
 import { TILE_SCALE } from "./spriteAssets";
 import {
+  ALL_WEAPON_IDS,
+  ALL_MOB_TYPES,
   BOSS_FLOOR_INTERVAL,
   BOSS_HEART_HP_BONUS,
+  BOSS_WEAPON_ID,
+  CHEST_SIZE,
+  PLAY_HEIGHT,
+  PLAY_WIDTH,
+  POTION_PICKUP_SIZE,
   SHOP_FLOOR_INTERVAL,
   SHOP_STATION_SIZE,
+  SLOT_MACHINE_SIZE,
+  SPECIAL_PICKUP_SIZE,
   SWORD_START_POSITION,
   VOID_SHARD_FLOOR_INTERVAL,
   VOID_SHARD_SIZE,
-  SLOT_MACHINE_SIZE,
-  POTION_PICKUP_SIZE,
-  CHEST_SIZE,
-  SPECIAL_PICKUP_SIZE,
-  ALL_MOB_TYPES,
-  ALL_WEAPON_IDS,
-  LEGENDARY_WEAPON_IDS,
 } from "./constants";
+import { getLegendaryWeaponPool } from "./legendaryPool";
 import { createRng } from "./rng";
 import { findLayoutPosition, findOpenPosition, isSnakeSpawnClear } from "./placement";
 import {
@@ -25,8 +28,8 @@ import {
   pickRoomLayout,
   ROOM_LAYOUTS,
 } from "./roomLayouts";
+import { GOLEM_HITBOX_SIZE } from "./golemSprites";
 import type { ChestLoot, Direction, Floor, MobConfig, MobType, Room } from "./types";
-import { PLAY_HEIGHT, PLAY_WIDTH } from "./constants";
 
 function spriteDrawSize(sprite: HTMLCanvasElement) {
   return {
@@ -57,7 +60,7 @@ function generateMob(type: MobType, depth: number, rng: () => number): MobConfig
       return {
         type,
         segments: [{ x: 0, y: 0 }],
-        size: 96,
+        size: GOLEM_HITBOX_SIZE,
         speed: 0.95 + depth * 0.025,
         maxHp: Math.floor(55 + depth * 8),
         contactDamage: Math.floor(baseContact * 1.5),
@@ -124,14 +127,18 @@ function generateChestLoot(depth: number, rng: () => number): ChestLoot {
   const roll = rng();
 
   if (roll < 0.5) {
-    const normalPool = ALL_WEAPON_IDS.filter((id) => !LEGENDARY_WEAPON_IDS.includes(id));
+    const legendaryPool = getLegendaryWeaponPool();
+    const normalPool = ALL_WEAPON_IDS.filter(
+      (id) => !legendaryPool.includes(id) && id !== BOSS_WEAPON_ID,
+    );
     return { kind: "weapon", weaponId: normalPool[Math.floor(rng() * normalPool.length)] };
   }
 
   if (roll < 0.58 && depth >= 4) {
+    const legendaryPool = getLegendaryWeaponPool();
     return {
       kind: "weapon",
-      weaponId: LEGENDARY_WEAPON_IDS[Math.floor(rng() * LEGENDARY_WEAPON_IDS.length)],
+      weaponId: legendaryPool[Math.floor(rng() * legendaryPool.length)],
     };
   }
 

@@ -23,6 +23,8 @@ export const TILE_DRAW_SIZE = 32;
 export const TILE_SCALE = TILE_DRAW_SIZE / TILE_SIZE;
 const HERO_FRAME = 40;
 export const HERO_DRAW_SIZE = 64;
+export const HERO_HITBOX_SIZE = HERO_FRAME;
+export const HERO_HITBOX_INSET = (HERO_DRAW_SIZE - HERO_HITBOX_SIZE) / 2;
 
 /**
  * Pixel Poem dungeon tileset (10×10 grid of 16px tiles).

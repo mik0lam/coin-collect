@@ -1,7 +1,12 @@
 import "./style.css";
 import { SPRITES, drawSprite, drawSpriteCentered, drawTintedSprite, getWeaponSprite, FLOOR_TILES } from "./sprites";
-import { loadAssetSprites, HERO_DRAW_SIZE, TILE_DRAW_SIZE, TILE_SCALE } from "./spriteAssets";
-import { loadGolemSprites, areGolemSpritesLoaded } from "./golemSprites";
+import { loadAssetSprites, HERO_DRAW_SIZE, HERO_HITBOX_INSET, HERO_HITBOX_SIZE, TILE_DRAW_SIZE, TILE_SCALE } from "./spriteAssets";
+import { loadGolemSprites, areGolemSpritesLoaded, getLaserFrame } from "./golemSprites";
+import {
+  getLegendaryWeaponPool,
+  resetLegendaryPool,
+  unlockGolemClubLegendary,
+} from "./legendaryPool";
 import {
   clearGolemEffects,
   createGolemBossState,
@@ -32,10 +37,10 @@ import {
   DASH_SPEED,
   DESCEND_BONUS,
   FLOOR_MESSAGE_MS,
-  LEGENDARY_WEAPON_IDS,
   MAX_INVENTORY_SIZE,
   INVENTORY_ABSOLUTE_MAX,
   BOSS_INVENTORY_BONUS,
+  BOSS_WEAPON_ID,
   ALL_WEAPON_IDS,
   MOB_COLORS,
   PLAY_HEIGHT,
@@ -52,6 +57,8 @@ import {
   VOID_SHARD_SIZE,
   WEAPON_PICKUP_SIZE,
   WEAPONS,
+  formatWeaponName,
+  getWeaponDisplayColor,
 } from "./constants";
 import { boxesOverlap, collidesWithRoomObstacles } from "./collision";
 import { generateFloor } from "./floorGeneration";
@@ -82,6 +89,8 @@ import {
   getLifeStealOnKill,
   getWeaponAbilityDescription,
   shouldChainStrike,
+  shouldFireGolemBeam,
+  getGolemBeamDamage,
   shouldSkipDurabilityLoss,
 } from "./weaponAbilities";
 import type {
@@ -349,6 +358,18 @@ let floorMessageUntil = 0;
 let floorMessage = "";
 let stairsCooldownUntil = 0;
 let stairsPrompt: "down" | "up" | null = null;
+let stairsDismissedUntilLeave = false;
+
+interface PlayerGolemBeam {
+  originX: number;
+  originY: number;
+  angle: number;
+  length: number;
+  width: number;
+  activeUntil: number;
+}
+
+const playerGolemBeams: PlayerGolemBeam[] = [];
 
 let hasDash = false;
 let dashCooldownUntil = 0;
@@ -529,7 +550,7 @@ window.addEventListener("keydown", (event) => {
       confirmStairsPrompt();
     } else if (key === "n" || key === "escape") {
       event.preventDefault();
-      stairsPrompt = null;
+      dismissStairsPrompt();
     }
 
     return;
@@ -624,13 +645,18 @@ window.addEventListener("keyup", (event) => {
   keys.delete(event.key.toLowerCase());
 });
 
-function getPlayerCollisionBox(x = player.x, y = player.y) {
+function getPlayerCollisionBox(drawX = player.x, drawY = player.y) {
   return {
-    x,
-    y,
-    w: player.size,
-    h: player.size,
+    x: drawX + HERO_HITBOX_INSET,
+    y: drawY + HERO_HITBOX_INSET,
+    w: HERO_HITBOX_SIZE,
+    h: HERO_HITBOX_SIZE,
   };
+}
+
+function setPlayerDrawPositionFromHitbox(hitboxX: number, hitboxY: number) {
+  player.x = hitboxX - HERO_HITBOX_INSET;
+  player.y = hitboxY - HERO_HITBOX_INSET;
 }
 
 function collidesWithObstacles(
@@ -810,7 +836,9 @@ function handleDebugMenuKey(key: string) {
       room.weaponPickup = {
         x: player.x + 20,
         y: player.y,
-        weaponId: LEGENDARY_WEAPON_IDS[Math.floor(Math.random() * LEGENDARY_WEAPON_IDS.length)],
+        weaponId: getLegendaryWeaponPool()[
+          Math.floor(Math.random() * getLegendaryWeaponPool().length)
+        ],
       };
       showFloorMessage("Legendary weapon spawned nearby.");
       break;
@@ -1146,6 +1174,7 @@ function applyRoomState(room: Room) {
   weaponSwing.lastObstacleDamagedSwing = 0;
   weaponSwing.weaponId = null;
   clearGolemEffects();
+  playerGolemBeams.length = 0;
 
   for (let i = 0; i < room.enemies.length; i++) {
     const config = room.enemies[i];
@@ -1425,6 +1454,7 @@ function resetGame() {
   debugInstakill = false;
   encyclopediaScroll = 0;
   resetWeaponEncyclopedia();
+  resetLegendaryPool();
   shopOpen = false;
   encyclopediaOpen = false;
   slotSpin.activeUntil = 0;
@@ -1445,6 +1475,8 @@ function resetGame() {
   floorMessage = "";
   stairsCooldownUntil = 0;
   stairsPrompt = null;
+  stairsDismissedUntilLeave = false;
+  playerGolemBeams.length = 0;
   hasDash = false;
   dashCooldownUntil = 0;
   dashActiveUntil = 0;
@@ -1535,13 +1567,14 @@ function slayMob(mob: RuntimeMob) {
 
   if (mob.type === "boss" && head) {
     room.bossDefeated = true;
+    unlockGolemClubLegendary();
     room.bossHeartPickup = { x: head.x - 24, y: head.y };
     room.bossWeaponPickup = {
       x: head.x + 36,
       y: head.y,
-      weaponId: LEGENDARY_WEAPON_IDS[Math.floor(Math.random() * LEGENDARY_WEAPON_IDS.length)],
+      weaponId: BOSS_WEAPON_ID,
     };
-    showFloorMessage("Boss defeated! Claim the Heart Container and legendary weapon.");
+    showFloorMessage("Boss defeated! Claim the Heart Container and Golem Club.");
     return;
   }
 
@@ -1644,9 +1677,14 @@ function tryAttack() {
   weaponSwing.weaponId = activeItem.weaponId!;
   weaponSwing.swingArcScale = def.swingArcScale;
   weaponSwing.swingSpriteSize = def.swingSpriteSize;
-  checkWeaponMobHits();
-  const hitObstacle = checkWeaponObstacleHits();
   const weaponId = activeItem.weaponId!;
+  checkWeaponMobHits();
+
+  if (shouldFireGolemBeam(weaponId)) {
+    fireGolemClubBeam(weaponId);
+  }
+
+  const hitObstacle = checkWeaponObstacleHits();
 
   if (
     !shouldSkipDurabilityLoss(weaponId) &&
@@ -1669,7 +1707,7 @@ function tryPickupWeapon() {
 
   if (
     !boxesOverlap(
-      { x: player.x, y: player.y, w: player.size, h: player.size },
+      getPlayerCollisionBox(),
       { x: pickup.x, y: pickup.y, w: WEAPON_PICKUP_SIZE, h: WEAPON_PICKUP_SIZE },
     )
   ) {
@@ -1865,26 +1903,140 @@ function endGame() {
   gameOverEl.classList.remove("hidden");
 }
 
+function facingToAngle(facing: Direction) {
+  switch (facing) {
+    case "east":
+      return 0;
+    case "south":
+      return Math.PI / 2;
+    case "west":
+      return Math.PI;
+    case "north":
+      return -Math.PI / 2;
+  }
+}
+
+function mobHitByBeam(
+  mob: RuntimeMob,
+  originX: number,
+  originY: number,
+  angle: number,
+  length: number,
+  width: number,
+) {
+  const endX = originX + Math.cos(angle) * length;
+  const endY = originY + Math.sin(angle) * length;
+  const half = width / 2 + mob.size * 0.35;
+  const segDx = endX - originX;
+  const segDy = endY - originY;
+  const lenSq = segDx * segDx + segDy * segDy;
+
+  if (lenSq === 0) {
+    return false;
+  }
+
+  for (const segment of mob.segments) {
+    const mcx = segment.x + mob.size / 2;
+    const mcy = segment.y + mob.size / 2;
+    const t = Math.max(
+      0,
+      Math.min(1, ((mcx - originX) * segDx + (mcy - originY) * segDy) / lenSq),
+    );
+    const closestX = originX + t * segDx;
+    const closestY = originY + t * segDy;
+    const distSq = (mcx - closestX) ** 2 + (mcy - closestY) ** 2;
+
+    if (distSq <= half * half) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function fireGolemClubBeam(weaponId: WeaponId) {
+  const cx = player.x + player.size / 2;
+  const cy = player.y + player.size / 2;
+  const angle = facingToAngle(playerFacing);
+  const now = performance.now();
+  const beamLength = 320;
+  const beamWidth = 18;
+  const beamDamage = getGolemBeamDamage(weaponId, WEAPONS[weaponId].damage);
+
+  playerGolemBeams.push({
+    originX: cx,
+    originY: cy,
+    angle,
+    length: beamLength,
+    width: beamWidth,
+    activeUntil: now + 260,
+  });
+
+  for (const mob of activeMobs) {
+    if (!isMobAlive(mob)) {
+      continue;
+    }
+
+    if (mobHitByBeam(mob, cx, cy, angle, beamLength, beamWidth)) {
+      const damage = getEffectiveDamage(weaponId, beamDamage, mob, debugInstakill);
+      damageMob(mob, damage);
+      break;
+    }
+  }
+}
+
+function drawPlayerGolemBeams() {
+  if (!areGolemSpritesLoaded()) {
+    return;
+  }
+
+  const now = performance.now();
+  const beamSprite = getLaserFrame(12);
+  const beamThickness = Math.max(beamSprite.height, 24);
+
+  for (const beam of playerGolemBeams) {
+    if (now >= beam.activeUntil) {
+      continue;
+    }
+
+    ctx.save();
+    ctx.translate(beam.originX, beam.originY);
+    ctx.rotate(beam.angle);
+    ctx.globalAlpha = 0.9;
+    drawSprite(ctx, beamSprite, 0, -beamThickness / 2, beam.length, beamThickness);
+    ctx.fillStyle = "rgba(120, 220, 255, 0.38)";
+    ctx.fillRect(0, -beam.width / 2, beam.length, beam.width);
+    ctx.restore();
+  }
+}
+
 function tryUseStairs() {
   if (performance.now() < stairsCooldownUntil) {
     stairsPrompt = null;
+    stairsDismissedUntilLeave = false;
     return;
   }
 
   const room = getCurrentRoom();
-  const playerBox = { x: player.x, y: player.y, w: player.size, h: player.size };
+  const playerBox = getPlayerCollisionBox();
+  let onStairs = false;
 
   if (room.stairsDownTile) {
     const bounds = stairsBounds("down", room.stairsDownTile);
 
     if (boxesOverlap(playerBox, bounds)) {
+      onStairs = true;
+
       if (room.isBossRoom && !room.bossDefeated) {
         showFloorMessage("Defeat the boss first!");
         stairsPrompt = null;
         return;
       }
 
-      stairsPrompt = "down";
+      if (!stairsDismissedUntilLeave) {
+        stairsPrompt = "down";
+      }
+
       return;
     }
   }
@@ -1893,18 +2045,33 @@ function tryUseStairs() {
     const bounds = stairsBounds("up", room.stairsUpTile);
 
     if (boxesOverlap(playerBox, bounds)) {
-      stairsPrompt = "up";
+      onStairs = true;
+
+      if (!stairsDismissedUntilLeave) {
+        stairsPrompt = "up";
+      }
+
       return;
     }
   }
 
+  if (!onStairs) {
+    stairsDismissedUntilLeave = false;
+    stairsPrompt = null;
+  }
+}
+
+function dismissStairsPrompt() {
   stairsPrompt = null;
+  stairsDismissedUntilLeave = true;
 }
 
 function confirmStairsPrompt() {
   if (!stairsPrompt) {
     return;
   }
+
+  stairsDismissedUntilLeave = false;
 
   if (stairsPrompt === "down") {
     descendFloor();
@@ -1984,7 +2151,7 @@ function getDoorHitbox(direction: Direction, room: Room) {
 
 function tryChangeRoom() {
   const room = getCurrentRoom();
-  const playerBox = { x: player.x, y: player.y, w: player.size, h: player.size };
+  const playerBox = getPlayerCollisionBox();
 
   const attempts: { direction: Direction; moveKeys: string[]; enteredFrom: Direction }[] = [
     { direction: "west", moveKeys: ["a", "arrowleft"], enteredFrom: "east" },
@@ -2074,17 +2241,16 @@ function movePlayer() {
     collisionPrev.x,
     collisionPrev.y,
   );
-  player.x = resolved.x;
-  player.y = resolved.y;
+  setPlayerDrawPositionFromHitbox(resolved.x, resolved.y);
 }
 
 function isCoinColliding() {
-  return (
-    player.x < coin.x + coin.size &&
-    player.x + player.size > coin.x &&
-    player.y < coin.y + coin.size &&
-    player.y + player.size > coin.y
-  );
+  return boxesOverlap(getPlayerCollisionBox(), {
+    x: coin.x,
+    y: coin.y,
+    w: coin.size,
+    h: coin.size,
+  });
 }
 
 function isPlayerInvincible() {
@@ -2116,10 +2282,12 @@ function isPlayerHitByMobs() {
 
     for (const segment of mob.segments) {
       if (
-        player.x < segment.x + mob.size &&
-        player.x + player.size > segment.x &&
-        player.y < segment.y + mob.size &&
-        player.y + player.size > segment.y
+        boxesOverlap(getPlayerCollisionBox(), {
+          x: segment.x,
+          y: segment.y,
+          w: mob.size,
+          h: mob.size,
+        })
       ) {
         return mob.contactDamage;
       }
@@ -2184,12 +2352,13 @@ function moveMobs() {
   for (const mob of activeMobs) {
     if (mob.type === "boss" && mob.golemState) {
       if (mob.golemState.phase !== "dying") {
+        const playerHitbox = getPlayerCollisionBox();
         updateGolemBoss(
           mob,
           mob.golemState,
-          player.x,
-          player.y,
-          player.size,
+          playerHitbox.x,
+          playerHitbox.y,
+          playerHitbox.w,
           (target) => clampMobToRoom(target, 0),
           takeDamage,
         );
@@ -2267,7 +2436,7 @@ function tryPickupPotion() {
 
   if (
     !boxesOverlap(
-      { x: player.x, y: player.y, w: player.size, h: player.size },
+      getPlayerCollisionBox(),
       {
         x: room.potionPickup.x,
         y: room.potionPickup.y,
@@ -2377,7 +2546,7 @@ function tryPickupVoidShard() {
 
   if (
     !boxesOverlap(
-      { x: player.x, y: player.y, w: player.size, h: player.size },
+      getPlayerCollisionBox(),
       {
         x: room.voidShardPickup.x,
         y: room.voidShardPickup.y,
@@ -2402,7 +2571,7 @@ function isNearSlotMachine() {
   }
 
   return boxesOverlap(
-    { x: player.x, y: player.y, w: player.size, h: player.size },
+    getPlayerCollisionBox(),
     {
       x: room.slotMachine.x,
       y: room.slotMachine.y,
@@ -2491,7 +2660,7 @@ function tryPickupBossWeapon() {
   const slot = addWeaponToInventory(pickup.weaponId);
 
   if (slot !== null) {
-    showFloorMessage(`★ ${WEAPONS[pickup.weaponId].name} claimed!`);
+    showFloorMessage(`${formatWeaponName(pickup.weaponId)} claimed!`);
     delete room.bossWeaponPickup;
   }
 }
@@ -2514,8 +2683,9 @@ function tryUseSlotMachine() {
   }
 
   voidShards -= 1;
+  const legendaryPool = getLegendaryWeaponPool();
   slotSpin.resultWeaponId =
-    LEGENDARY_WEAPON_IDS[Math.floor(Math.random() * LEGENDARY_WEAPON_IDS.length)];
+    legendaryPool[Math.floor(Math.random() * legendaryPool.length)];
   slotSpin.startedAt = now;
   slotSpin.activeUntil = now + SLOT_SPIN_MS;
 }
@@ -2551,7 +2721,7 @@ function tryOpenChest() {
 
   if (
     !boxesOverlap(
-      { x: player.x, y: player.y, w: player.size, h: player.size },
+      getPlayerCollisionBox(),
       { x: room.chest.x, y: room.chest.y, w: CHEST_SIZE, h: CHEST_SIZE },
     )
   ) {
@@ -2563,6 +2733,14 @@ function tryOpenChest() {
 }
 
 function update() {
+  const now = performance.now();
+
+  for (let i = playerGolemBeams.length - 1; i >= 0; i--) {
+    if (playerGolemBeams[i].activeUntil <= now) {
+      playerGolemBeams.splice(i, 1);
+    }
+  }
+
   if (mapOpen || inventoryOpen || encyclopediaOpen || debugMenuOpen || itemDebugMenuOpen || stairsPrompt) {
     return;
   }
@@ -2615,9 +2793,10 @@ function updateHtmlHud() {
     const def = WEAPONS[activeWeapon.weaponId!];
     const durability = getWeaponDurability(activeWeapon);
     const cooldownReady = performance.now() >= weaponSwing.lastAttackAt + def.cooldownMs;
-    const prefix = def.rarity === "legendary" ? "★ " : "";
+    const prefix = formatWeaponName(activeWeapon.weaponId!).replace(def.name, "").trim();
+    const nameLabel = prefix ? `${prefix} ${def.name}` : def.name;
     hudWeaponNameEl.textContent = cooldownReady
-      ? `${prefix}${def.name} (${durability})`
+      ? `${nameLabel} (${durability})`
       : "Cooling down…";
     hudDurFillEl.style.width = `${(durability / def.maxDurability) * 100}%`;
     hudWeaponNameEl.classList.toggle("hud-weapon-ready", cooldownReady);
@@ -3352,6 +3531,7 @@ function drawSlotSpinOverlay() {
 
   const progress = Math.min(1, (now - slotSpin.startedAt) / SLOT_SPIN_MS);
   const slowing = progress ** 3;
+  const legendaryPool = getLegendaryWeaponPool();
   const reelW = 72;
   const reelH = 72;
   const gap = 14;
@@ -3388,8 +3568,8 @@ function drawSlotSpinOverlay() {
     const weaponId =
       reel === 1 && progress > 0.82 && slotSpin.resultWeaponId
         ? slotSpin.resultWeaponId
-        : LEGENDARY_WEAPON_IDS[
-            (spinOffset + reel) % LEGENDARY_WEAPON_IDS.length
+        : legendaryPool[
+            (spinOffset + reel) % legendaryPool.length
           ];
 
     drawSprite(
@@ -3481,11 +3661,10 @@ function drawInventoryItem(
     drawSprite(ctx, getWeaponSprite(item.weaponId), slotX + 16, slotY + 16, iconSize, iconSize);
     const dur = getWeaponDurability(item);
     const maxDur = WEAPONS[item.weaponId].maxDurability;
-    const def = WEAPONS[item.weaponId];
-    ctx.fillStyle = def.rarity === "legendary" ? "#ffd860" : "#fff";
+    ctx.fillStyle = getWeaponDisplayColor(item.weaponId);
     ctx.font = "9px Arial";
     ctx.textAlign = "center";
-    ctx.fillText(def.name, centerX, slotY + slotSize - 20);
+    ctx.fillText(formatWeaponName(item.weaponId), centerX, slotY + slotSize - 20);
     ctx.fillStyle = dur > maxDur * 0.25 ? "#ccc" : "#f88";
     ctx.fillText(`${dur}/${maxDur}`, centerX, slotY + slotSize - 8);
   } else if (item.type === "special" && item.specialId) {
@@ -3933,7 +4112,6 @@ function drawEncyclopediaOverlay() {
 
     if (discovered) {
       const def = WEAPONS[weaponId];
-      const prefix = def.rarity === "legendary" ? "★ " : "";
 
       drawSprite(
         ctx,
@@ -3945,9 +4123,9 @@ function drawEncyclopediaOverlay() {
       );
 
       ctx.textAlign = "left";
-      ctx.fillStyle = def.rarity === "legendary" ? "#e8c8ff" : "#e8e0d0";
+      ctx.fillStyle = def.stars ? "#a8e0ff" : def.rarity === "legendary" ? "#e8c8ff" : "#e8e0d0";
       ctx.font = "bold 15px Arial";
-      ctx.fillText(`${prefix}${def.name}`, panelX + 80, y + 28);
+      ctx.fillText(formatWeaponName(weaponId), panelX + 80, y + 28);
       ctx.font = "12px Arial";
       ctx.fillStyle = "#b8a890";
       ctx.fillText(
@@ -3955,7 +4133,7 @@ function drawEncyclopediaOverlay() {
         panelX + 80,
         y + 46,
       );
-      ctx.fillStyle = def.rarity === "legendary" ? "#c8a0ff" : "#8a8070";
+      ctx.fillStyle = def.stars ? "#7ab8d8" : def.rarity === "legendary" ? "#c8a0ff" : "#8a8070";
       ctx.fillText(getWeaponAbilityDescription(weaponId), panelX + 80, y + 62);
     } else {
       ctx.fillStyle = "#3a3540";
@@ -3983,12 +4161,11 @@ function drawDebugCatalogItem(entry: DebugGrantEntry, slotX: number, slotY: numb
   const centerX = slotX + slotSize / 2;
 
   if (entry.kind === "weapon") {
-    const def = WEAPONS[entry.weaponId];
     drawSprite(ctx, getWeaponSprite(entry.weaponId), slotX + 16, slotY + 16, iconSize, iconSize);
-    ctx.fillStyle = def.rarity === "legendary" ? "#ffd860" : "#fff";
+    ctx.fillStyle = getWeaponDisplayColor(entry.weaponId);
     ctx.font = "9px Arial";
     ctx.textAlign = "center";
-    ctx.fillText(def.name, centerX, slotY + slotSize - 8);
+    ctx.fillText(formatWeaponName(entry.weaponId), centerX, slotY + slotSize - 8);
   } else if (entry.kind === "health-potion") {
     drawSprite(ctx, SPRITES.potionHealth, slotX + 16, slotY + 18, iconSize, iconSize);
     ctx.fillStyle = "#ddd";
@@ -4132,10 +4309,10 @@ function drawBossWeaponPickup() {
     size - 8,
   );
 
-  ctx.fillStyle = "#e8c8ff";
+  ctx.fillStyle = getWeaponDisplayColor(pickup.weaponId);
   ctx.font = "bold 10px Arial";
   ctx.textAlign = "center";
-  ctx.fillText(`★ ${WEAPONS[pickup.weaponId].name}`, pickup.x + size / 2, pickup.y - 6 + pulse);
+  ctx.fillText(formatWeaponName(pickup.weaponId), pickup.x + size / 2, pickup.y - 6 + pulse);
   ctx.textAlign = "left";
 }
 
@@ -4225,6 +4402,7 @@ function draw() {
   drawPlayer();
 
   drawWeaponSwing();
+  drawPlayerGolemBeams();
 
   if (!getCurrentRoom().coinCollected) {
     drawSpriteCentered(ctx, SPRITES.coin, coin.x + coin.size / 2, coin.y + coin.size / 2, coin.size);

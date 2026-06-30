@@ -11,7 +11,8 @@ export type WeaponId =
   | "soulreaver"
   | "storm-cleaver"
   | "blood-reaper"
-  | "phantom-blade";
+  | "phantom-blade"
+  | "golem-club";
 export type InventoryItemType = "health-potion" | "strong-potion" | "weapon" | "special";
 export type SpecialItemId = "dash-boots";
 export type ArmorTier = "none" | "leather" | "chain" | "plate";
@@ -28,6 +29,7 @@ export interface WeaponDef {
   swingColor: string;
   swingArcScale: number;
   swingSpriteSize: number;
+  stars?: number;
   rarity?: "normal" | "legendary";
   ability?: string;
 }
@@ -54,6 +56,7 @@ export interface GolemBossState {
   attackTriggered: boolean;
   deathHandled: boolean;
   hurtUntil: number;
+  aimAngle: number;
 }
 
 export interface RuntimeMob {

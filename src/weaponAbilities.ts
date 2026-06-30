@@ -11,6 +11,8 @@ export function getLegendaryAbilityLabel(weaponId: WeaponId) {
       return "Execution — double damage below 30% HP";
     case "phantom-blade":
       return "Phase Strike — attacks never lose durability";
+    case "golem-club":
+      return "Golem Beam — each swing fires a laser at the first foe (+2 dmg)";
     default:
       return null;
   }
@@ -43,6 +45,14 @@ export function getLifeStealOnKill(weaponId: WeaponId) {
 
 export function shouldChainStrike(weaponId: WeaponId, rng = Math.random()) {
   return weaponId === "storm-cleaver" && rng < 0.4;
+}
+
+export function shouldFireGolemBeam(weaponId: WeaponId) {
+  return weaponId === "golem-club";
+}
+
+export function getGolemBeamDamage(_weaponId: WeaponId, _baseDamage: number) {
+  return 2;
 }
 
 export function getWeaponAbilityDescription(weaponId: WeaponId) {

@@ -1,5 +1,5 @@
 import type { WeaponId } from "./types";
-import { WEAPONS } from "./constants";
+import { formatWeaponName } from "./constants";
 
 export interface RunRecord {
   id: string;
@@ -42,10 +42,7 @@ export function formatBestWeapon(id: WeaponId | null) {
     return "—";
   }
 
-  const def = WEAPONS[id];
-  const star = def.rarity === "legendary" ? "★ " : "";
-
-  return `${star}${def.name}`;
+  return formatWeaponName(id);
 }
 
 export function formatDuration(ms: number) {

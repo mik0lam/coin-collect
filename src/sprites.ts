@@ -662,7 +662,7 @@ const phantomBladeSprite = buildSprite(
     "...bbbbbb.........",
     "...bbbbbb.........",
     "..bbbbbb..........",
-    "..bbbb............",
+    "..bbbb..........",
     "..bbbb............",
     "...bb.............",
     "...bb.............",
@@ -670,6 +670,28 @@ const phantomBladeSprite = buildSprite(
     "....................",
   ],
   mergePalettes(METAL, LEATHER, LEGENDARY),
+);
+
+const golemClubSprite = buildSprite(
+  [
+    "......zzzzzz......",
+    "...zzZZCCZZzz...",
+    "..zzZZCCCCZZzz..",
+    ".zzZZCCwwCCZZzz.",
+    ".zzZZCCwwCCZZzz.",
+    "..zzZZWWCCZZzz..",
+    "...zzZZCCZZzz...",
+    "....zzZZZZzz....",
+    ".....bbbbbb.....",
+    ".....bbbbbb.....",
+    "......bbbb......",
+    "......bbbb......",
+    ".......bb.......",
+    ".......bb.......",
+    "........b.......",
+    "................",
+  ],
+  mergePalettes(STONE, { C: "#44ccff", c: "#2288cc", w: "#aaeeff", W: "#66ddff" }, LEGENDARY),
 );
 
 const rockSprite = buildSprite(
@@ -760,6 +782,7 @@ export const SPRITES: SpriteSheet = {
   "storm-cleaver": stormCleaverSprite,
   "blood-reaper": bloodReaperSprite,
   "phantom-blade": phantomBladeSprite,
+  "golem-club": golemClubSprite,
   door: doorSprite,
   stairsDown,
   stairsUp,
@@ -797,7 +820,8 @@ export type WeaponSpriteId =
   | "soulreaver"
   | "storm-cleaver"
   | "blood-reaper"
-  | "phantom-blade";
+  | "phantom-blade"
+  | "golem-club";
 
 const WEAPON_SPRITE_MAP: Record<WeaponSpriteId, HTMLCanvasElement> = {
   "rusty-sword": rustySword,
@@ -808,6 +832,7 @@ const WEAPON_SPRITE_MAP: Record<WeaponSpriteId, HTMLCanvasElement> = {
   "storm-cleaver": stormCleaverSprite,
   "blood-reaper": bloodReaperSprite,
   "phantom-blade": phantomBladeSprite,
+  "golem-club": golemClubSprite,
 };
 
 export function getWeaponSprite(weaponId: WeaponSpriteId) {

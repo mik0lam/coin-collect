@@ -116,7 +116,47 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     rarity: "legendary",
     ability: "Phase Strike — attacks never lose durability",
   },
+  "golem-club": {
+    damage: 4,
+    knockback: 28,
+    range: 48,
+    width: 42,
+    cooldownMs: 500,
+    durationMs: 180,
+    maxDurability: 70,
+    name: "Golem Club",
+    swingColor: "rgba(100, 200, 255, 0.9)",
+    swingArcScale: 1.15,
+    swingSpriteSize: 48,
+    stars: 2,
+    ability: "Golem Beam — each swing fires a laser at the first foe (+2 dmg)",
+  },
 };
+
+export function formatWeaponName(weaponId: WeaponId) {
+  const def = WEAPONS[weaponId];
+  const prefix = def.stars
+    ? `${"★".repeat(def.stars)} `
+    : def.rarity === "legendary"
+      ? "★ "
+      : "";
+
+  return `${prefix}${def.name}`;
+}
+
+export function getWeaponDisplayColor(weaponId: WeaponId) {
+  const def = WEAPONS[weaponId];
+
+  if (def.rarity === "legendary") {
+    return "#ffd860";
+  }
+
+  if (def.stars && def.stars >= 2) {
+    return "#88ccff";
+  }
+
+  return "#ffffff";
+}
 
 export const LEGENDARY_WEAPON_IDS: WeaponId[] = [
   "soulreaver",
@@ -124,6 +164,8 @@ export const LEGENDARY_WEAPON_IDS: WeaponId[] = [
   "blood-reaper",
   "phantom-blade",
 ];
+
+export const BOSS_WEAPON_ID: WeaponId = "golem-club";
 
 export const ALL_WEAPON_IDS = Object.keys(WEAPONS) as WeaponId[];
 

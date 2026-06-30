@@ -110,3 +110,29 @@ canvas {
   border: 1px solid #444;
   border-radius: 4px;
 }
+
+.game-over-title {
+  margin: 0 0 0.75rem;
+  font-size: 3.5rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #ff4d4d;
+  text-shadow: 0 0 20px rgba(255, 77, 77, 0.4);
+}
+
+.game-over-message {
+  margin: 0 0 1rem;
+  font-size: 1.1rem;
+  color: #ccc;
+}
+
+.game-over-score {
+  margin: 0 0 2rem;
+  font-size: 1.5rem;
+  color: white;
+}
+
+.game-over-score span {
+  color: gold;
+  font-weight: bold;
+}

@@ -1,5 +1,11 @@
 import "./style.css";
-import { SPRITES, drawSprite, drawSpriteCentered, drawTintedSprite } from "./sprites";
+import { SPRITES, drawSprite, drawSpriteCentered, drawTintedSprite, getWeaponSprite } from "./sprites";
+import {
+  findLayoutPosition,
+  layoutToObstacles,
+  pickRoomLayout,
+  ROOM_LAYOUTS,
+} from "./roomLayouts";
 
 function required<T>(value: T | null | undefined, name: string): T {
   if (value == null) {
@@ -17,12 +23,35 @@ if (!app) {
 
 app.innerHTML = `
   <div id="menu" class="menu">
+    <div class="menu-scene" aria-hidden="true">
+      <div class="menu-glow menu-glow-left"></div>
+      <div class="menu-glow menu-glow-right"></div>
+      <div class="menu-vignette"></div>
+    </div>
     <div class="menu-content">
-      <h1 class="menu-title">Coin Collect</h1>
-      <p class="menu-tagline">Descend the dungeon. Loot chests. Slay mobs.</p>
-      <div class="menu-coin" aria-hidden="true"></div>
-      <button id="play-btn" class="menu-btn" type="button">Play</button>
-      <p class="menu-controls">Move with <kbd>WASD</kbd> or <kbd>Arrow keys</kbd><br />Press <kbd>Space</kbd> to attack · <kbd>I</kbd> inventory · <kbd>1</kbd>/<kbd>2</kbd> potions · <kbd>3</kbd>–<kbd>8</kbd> weapon slots</p>
+      <p class="menu-eyebrow">Pixel dungeon descent</p>
+      <h1 class="menu-title">
+        <span class="menu-title-line">Cavern</span>
+        <span class="menu-title-line menu-title-accent">Crawler</span>
+      </h1>
+      <p class="menu-tagline">Loot chests · Slay mobs · Delve deeper</p>
+      <canvas id="menu-art" class="menu-art" width="360" height="128" aria-hidden="true"></canvas>
+      <div class="menu-actions">
+        <button id="play-btn" class="menu-btn menu-btn-primary" type="button">Enter the Cavern</button>
+        <button id="help-btn" class="menu-btn menu-btn-secondary" type="button">Controls</button>
+      </div>
+    </div>
+    <div id="menu-help" class="menu-help hidden">
+      <h2 class="menu-help-title">Controls</h2>
+      <dl class="menu-help-list">
+        <div><dt>Move</dt><dd><kbd>WASD</kbd> or <kbd>Arrow keys</kbd></dd></div>
+        <div><dt>Attack</dt><dd><kbd>Space</kbd></dd></div>
+        <div><dt>Map</dt><dd><kbd>M</kbd></dd></div>
+        <div><dt>Inventory</dt><dd><kbd>I</kbd> · drag items to rearrange</dd></div>
+        <div><dt>Potions</dt><dd><kbd>1</kbd> health · <kbd>2</kbd> strong</dd></div>
+        <div><dt>Weapons</dt><dd><kbd>3</kbd>–<kbd>8</kbd> select active slot</dd></div>
+      </dl>
+      <button id="help-close-btn" class="menu-btn menu-btn-secondary" type="button">Back</button>
     </div>
   </div>
   <div id="game-wrap" class="game-wrap hidden">
@@ -61,20 +90,32 @@ app.innerHTML = `
     <canvas id="game" width="800" height="444"></canvas>
     <p class="game-hint">WASD move · Space attack · 1/2 potions · 3–8 weapon slots · drag items in inventory · M map · I inventory</p>
   </div>
-  <div id="game-over" class="menu hidden">
+  <div id="game-over" class="menu menu-game-over hidden">
+    <div class="menu-scene" aria-hidden="true">
+      <div class="menu-glow menu-glow-left"></div>
+      <div class="menu-glow menu-glow-danger"></div>
+      <div class="menu-vignette"></div>
+    </div>
     <div class="menu-content">
+      <p class="menu-eyebrow menu-eyebrow-danger">Cavern Crawler</p>
       <h1 class="game-over-title">Game Over</h1>
-      <p class="game-over-message">The dungeon got you!</p>
+      <p class="game-over-message">The depths claimed another crawler.</p>
       <p class="game-over-score">Depth <span id="final-depth">1</span> · Score <span id="final-score">0</span></p>
-      <button id="menu-btn" class="menu-btn" type="button">Main Menu</button>
+      <button id="menu-btn" class="menu-btn menu-btn-secondary" type="button">Return to Surface</button>
     </div>
   </div>
 `;
 
 const menuEl = required(document.querySelector<HTMLDivElement>("#menu"), "Menu");
+const menuHelpEl = required(document.querySelector<HTMLDivElement>("#menu-help"), "Menu help");
 const playBtn = required(
   document.querySelector<HTMLButtonElement>("#play-btn"),
   "Play button",
+);
+const helpBtn = required(document.querySelector<HTMLButtonElement>("#help-btn"), "Help button");
+const helpCloseBtn = required(
+  document.querySelector<HTMLButtonElement>("#help-close-btn"),
+  "Help close button",
 );
 const canvas = required(document.querySelector<HTMLCanvasElement>("#game"), "Canvas");
 const ctx = required(canvas.getContext("2d"), "Canvas context");
@@ -122,6 +163,16 @@ interface WeaponDef {
   maxDurability: number;
   name: string;
   swingColor: string;
+  swingArcScale: number;
+  swingSpriteSize: number;
+}
+
+interface Obstacle {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  kind: "wall" | "rock" | "pillar";
 }
 
 interface MobConfig {
@@ -181,6 +232,7 @@ interface Room {
   chest?: Chest;
   stairsDownTile?: { x: number; y: number };
   stairsUpTile?: { x: number; y: number };
+  obstacles: Obstacle[];
 }
 
 interface Floor {
@@ -201,6 +253,8 @@ const WEAPONS: Record<WeaponId, WeaponDef> = {
     maxDurability: 25,
     name: "Rusty Sword",
     swingColor: "rgba(255, 120, 40, 0.85)",
+    swingArcScale: 1,
+    swingSpriteSize: 38,
   },
   "iron-sword": {
     damage: 2,
@@ -212,6 +266,8 @@ const WEAPONS: Record<WeaponId, WeaponDef> = {
     maxDurability: 40,
     name: "Iron Sword",
     swingColor: "rgba(180, 200, 230, 0.9)",
+    swingArcScale: 1.05,
+    swingSpriteSize: 42,
   },
   "war-axe": {
     damage: 3,
@@ -223,6 +279,8 @@ const WEAPONS: Record<WeaponId, WeaponDef> = {
     maxDurability: 35,
     name: "War Axe",
     swingColor: "rgba(255, 80, 20, 0.9)",
+    swingArcScale: 1.25,
+    swingSpriteSize: 46,
   },
   dagger: {
     damage: 1,
@@ -234,6 +292,8 @@ const WEAPONS: Record<WeaponId, WeaponDef> = {
     maxDurability: 50,
     name: "Dagger",
     swingColor: "rgba(210, 225, 255, 0.8)",
+    swingArcScale: 0.72,
+    swingSpriteSize: 30,
   },
 };
 
@@ -293,7 +353,11 @@ const weaponSwing = {
   swingColor: "",
   durationMs: 0,
   range: 0,
+  weaponId: null as WeaponId | null,
+  swingArcScale: 1,
+  swingSpriteSize: 38,
 };
+
 
 const WEAPON_PICKUP_SIZE = 48;
 const STAIRS_TILE_SIZE = 56;
@@ -458,6 +522,98 @@ function findClearPosition(
   return randomPosition(rng, margin);
 }
 
+function getDoorClearZones() {
+  const centerX = PLAY_WIDTH / 2 - DOOR_LENGTH / 2;
+  const centerY = PLAY_HEIGHT / 2 - DOOR_LENGTH / 2;
+  const pad = 36;
+
+  return [
+    { x: centerX - pad, y: 0, w: DOOR_LENGTH + pad * 2, h: DOOR_HIT_DEPTH + pad },
+    {
+      x: centerX - pad,
+      y: PLAY_HEIGHT - DOOR_HIT_DEPTH - pad,
+      w: DOOR_LENGTH + pad * 2,
+      h: DOOR_HIT_DEPTH + pad,
+    },
+    { x: 0, y: centerY - pad, w: DOOR_HIT_DEPTH + pad, h: DOOR_LENGTH + pad * 2 },
+    {
+      x: PLAY_WIDTH - DOOR_HIT_DEPTH - pad,
+      y: centerY - pad,
+      w: DOOR_HIT_DEPTH + pad,
+      h: DOOR_LENGTH + pad * 2,
+    },
+  ];
+}
+
+function rollRoomLoot(rng: () => number) {
+  const roll = rng();
+
+  if (roll < 0.14) {
+    return "chest" as const;
+  }
+
+  if (roll < 0.32) {
+    return "potion" as const;
+  }
+
+  return "none" as const;
+}
+
+function getRoomObstacles(room = getCurrentRoom()) {
+  return room.obstacles ?? [];
+}
+
+function collidesWithObstacles(
+  box: { x: number; y: number; w: number; h: number },
+  room = getCurrentRoom(),
+) {
+  return getRoomObstacles(room).some((obstacle) => boxesOverlap(box, obstacle));
+}
+
+function resolveObstaclePosition(
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  prevX: number,
+  prevY: number,
+) {
+  if (!collidesWithObstacles({ x, y, w, h })) {
+    return { x, y };
+  }
+
+  if (!collidesWithObstacles({ x, y: prevY, w, h })) {
+    return { x, y: prevY };
+  }
+
+  if (!collidesWithObstacles({ x: prevX, y, w, h })) {
+    return { x: prevX, y };
+  }
+
+  return { x: prevX, y: prevY };
+}
+
+function clampMobToRoom(mob: RuntimeMob, segmentIndex: number) {
+  const segment = mob.segments[segmentIndex];
+  const prevX = segment.x;
+  const prevY = segment.y;
+
+  segment.x = Math.max(0, Math.min(PLAY_WIDTH - mob.size, segment.x));
+  segment.y = Math.max(0, Math.min(PLAY_HEIGHT - mob.size, segment.y));
+
+  const resolved = resolveObstaclePosition(
+    segment.x,
+    segment.y,
+    mob.size,
+    mob.size,
+    prevX,
+    prevY,
+  );
+
+  segment.x = resolved.x;
+  segment.y = resolved.y;
+}
+
 function backgroundForDepth(depth: number, variant: number) {
   const hue = (205 + depth * 14 + variant * 27) % 360;
   const lightness = Math.max(7, 20 - depth * 1.5);
@@ -524,8 +680,12 @@ function generateMob(type: MobType, depth: number, rng: () => number): MobConfig
 
 const ALL_MOB_TYPES: MobType[] = ["snake", "slime", "wraith", "brute"];
 
-function generateEnemies(depth: number, rng: () => number): MobConfig[] {
-  const count = depth === 1 ? 1 : 1 + Math.floor(rng() * 2);
+function generateEnemies(depth: number, rng: () => number, isStartRoom: boolean) {
+  if (isStartRoom && depth === 1) {
+    return [];
+  }
+
+  const count = depth <= 3 ? 1 : rng() < 0.75 ? 1 : 2;
   const enemies: MobConfig[] = [];
 
   for (let i = 0; i < count; i++) {
@@ -601,8 +761,10 @@ function generateFloor(depth: number, seed: number): Floor {
       farthestRoomId = cell.id;
     }
 
-    const namePart = ROOM_NAME_PARTS[Math.floor(rng() * ROOM_NAME_PARTS.length)];
-    const occupied: { x: number; y: number; w: number; h: number }[] = [];
+    const isStartRoom = cell.id === startId;
+    const occupied: { x: number; y: number; w: number; h: number }[] = [
+      ...getDoorClearZones(),
+    ];
     const centerStairs = {
       x: PLAY_WIDTH / 2 - STAIRS_TILE_SIZE / 2,
       y: PLAY_HEIGHT / 2 - STAIRS_TILE_SIZE / 2,
@@ -611,40 +773,77 @@ function generateFloor(depth: number, seed: number): Floor {
     };
     occupied.push(centerStairs);
 
-    const coinPos = findClearPosition(rng, coin.size, occupied, 64);
+    const layout =
+      isStartRoom && depth === 1
+        ? ROOM_LAYOUTS.find((entry) => entry.id === "start")!
+        : pickRoomLayout(rng, isStartRoom);
+    const obstacles = layoutToObstacles(layout, occupied);
+    occupied.push(...obstacles);
+
+    const coinPos = findLayoutPosition(rng, coin.size, occupied, layout);
     occupied.push({ x: coinPos.x, y: coinPos.y, w: coin.size, h: coin.size });
 
     rooms[cell.id] = {
       id: cell.id,
-      name: `Depth ${depth} · ${namePart}`,
+      name: `Depth ${depth} · ${layout.label}`,
       background: backgroundForDepth(depth, Math.floor(rng() * 5)),
       gridX: cell.gx,
       gridY: cell.gy,
       exits,
       coin: coinPos,
-      enemies: generateEnemies(depth, rng),
+      enemies: [],
+      obstacles,
     };
 
-    if (rng() < 0.42) {
-      const potionPos = findClearPosition(rng, POTION_PICKUP_SIZE, occupied, 72);
-      occupied.push({
-        x: potionPos.x,
-        y: potionPos.y,
-        w: POTION_PICKUP_SIZE,
-        h: POTION_PICKUP_SIZE,
-      });
-      rooms[cell.id].potionPickup = potionPos;
-      rooms[cell.id].potionHeal = 30 + Math.floor(depth * 12 + rng() * 10);
+    const enemies = generateEnemies(depth, rng, isStartRoom);
+
+    for (const enemy of enemies) {
+      const spawn = findLayoutPosition(rng, enemy.size, occupied, layout);
+
+      if (enemy.type === "snake") {
+        const segmentCount = enemy.segments.length;
+
+        enemy.segments = [];
+
+        for (let s = 0; s < segmentCount; s++) {
+          enemy.segments.push({ x: spawn.x - s * 28, y: spawn.y });
+        }
+      } else {
+        enemy.segments = [{ x: spawn.x, y: spawn.y }];
+      }
+
+      occupied.push({ x: spawn.x, y: spawn.y, w: enemy.size, h: enemy.size });
+      rooms[cell.id].enemies.push(enemy);
     }
 
-    if (rng() < 0.3) {
-      const chestPos = findClearPosition(rng, CHEST_SIZE, occupied, 72);
-      rooms[cell.id].chest = {
-        x: chestPos.x,
-        y: chestPos.y,
-        opened: false,
-        loot: generateChestLoot(depth, rng),
-      };
+    if (!(isStartRoom && depth === 1)) {
+      const loot = rollRoomLoot(rng);
+
+      if (loot === "potion") {
+        const potionPos = findLayoutPosition(rng, POTION_PICKUP_SIZE, occupied, layout);
+        occupied.push({
+          x: potionPos.x,
+          y: potionPos.y,
+          w: POTION_PICKUP_SIZE,
+          h: POTION_PICKUP_SIZE,
+        });
+        rooms[cell.id].potionPickup = potionPos;
+        rooms[cell.id].potionHeal = 30 + Math.floor(depth * 12 + rng() * 10);
+      } else if (loot === "chest") {
+        const chestPos = findLayoutPosition(rng, CHEST_SIZE, occupied, layout);
+        occupied.push({
+          x: chestPos.x,
+          y: chestPos.y,
+          w: CHEST_SIZE,
+          h: CHEST_SIZE,
+        });
+        rooms[cell.id].chest = {
+          x: chestPos.x,
+          y: chestPos.y,
+          opened: false,
+          loot: generateChestLoot(depth, rng),
+        };
+      }
     }
   }
 
@@ -799,6 +998,7 @@ function applyRoomState(room: Room) {
   activeMobs.length = 0;
   weaponSwing.activeUntil = 0;
   weaponSwing.lastAttackAt = 0;
+  weaponSwing.weaponId = null;
 
   for (let i = 0; i < room.enemies.length; i++) {
     const config = room.enemies[i];
@@ -1118,8 +1318,8 @@ function getSwingHitbox() {
   }
 }
 
-function getSwingArcAngles(): { start: number; end: number } {
-  const sweep = Math.PI * 0.7;
+function getSwingArcAngles(arcScale = 1) {
+  const sweep = Math.PI * 0.7 * arcScale;
 
   switch (playerFacing) {
     case "east":
@@ -1176,8 +1376,20 @@ function applyKnockback(mob: RuntimeMob, knockback: number) {
   }
 
   for (const segment of mob.segments) {
+    const prevX = segment.x;
+    const prevY = segment.y;
     segment.x = Math.max(0, Math.min(PLAY_WIDTH - mob.size, segment.x + dx));
     segment.y = Math.max(0, Math.min(PLAY_HEIGHT - mob.size, segment.y + dy));
+    const resolved = resolveObstaclePosition(
+      segment.x,
+      segment.y,
+      mob.size,
+      mob.size,
+      prevX,
+      prevY,
+    );
+    segment.x = resolved.x;
+    segment.y = resolved.y;
   }
 }
 
@@ -1187,6 +1399,7 @@ function tryAttack() {
   }
 
   const def = getEquippedWeaponDef();
+  const activeItem = getActiveWeaponItem()!;
   const now = performance.now();
 
   if (now < weaponSwing.lastAttackAt + def.cooldownMs) {
@@ -1198,6 +1411,9 @@ function tryAttack() {
   weaponSwing.swingColor = def.swingColor;
   weaponSwing.durationMs = def.durationMs;
   weaponSwing.range = def.range;
+  weaponSwing.weaponId = activeItem.weaponId!;
+  weaponSwing.swingArcScale = def.swingArcScale;
+  weaponSwing.swingSpriteSize = def.swingSpriteSize;
   checkWeaponHits();
   consumeWeaponDurability(1);
 }
@@ -1284,15 +1500,22 @@ function updateFacing() {
   }
 }
 
+function setMenuHelpOpen(open: boolean) {
+  menuHelpEl.classList.toggle("hidden", !open);
+  menuEl.querySelector(".menu-content")?.classList.toggle("hidden", open);
+}
+
 function showMenu() {
   state = "menu";
   keys.clear();
   setMapOpen(false);
   setInventoryOpen(false);
+  setMenuHelpOpen(false);
 
   gameOverEl.classList.add("hidden");
   gameWrap.classList.add("hidden");
   menuEl.classList.remove("hidden");
+  startMenuArtLoop();
 }
 
 function startGame() {
@@ -1423,6 +1646,9 @@ function tryChangeRoom() {
 }
 
 function movePlayer() {
+  const prevX = player.x;
+  const prevY = player.y;
+
   if (keys.has("w") || keys.has("arrowup")) {
     player.y -= player.speed;
   }
@@ -1445,6 +1671,17 @@ function movePlayer() {
 
   player.x = Math.max(0, Math.min(PLAY_WIDTH - player.size, player.x));
   player.y = Math.max(0, Math.min(PLAY_HEIGHT - player.size, player.y));
+
+  const resolved = resolveObstaclePosition(
+    player.x,
+    player.y,
+    player.size,
+    player.size,
+    prevX,
+    prevY,
+  );
+  player.x = resolved.x;
+  player.y = resolved.y;
 }
 
 function isCoinColliding() {
@@ -1514,8 +1751,7 @@ function moveMob(mob: RuntimeMob) {
     head.y += (dy / distance) * mob.speed;
   }
 
-  head.x = Math.max(0, Math.min(PLAY_WIDTH - mob.size, head.x));
-  head.y = Math.max(0, Math.min(PLAY_HEIGHT - mob.size, head.y));
+  clampMobToRoom(mob, 0);
 
   if (mob.type === "snake") {
     for (let i = 1; i < mob.segments.length; i++) {
@@ -1530,6 +1766,8 @@ function moveMob(mob: RuntimeMob) {
         current.x += (followDx / followDistance) * mob.speed;
         current.y += (followDy / followDistance) * mob.speed;
       }
+
+      clampMobToRoom(mob, i);
     }
   }
 }
@@ -1997,7 +2235,7 @@ function drawWeaponPickup() {
 
   drawSprite(
     ctx,
-    SPRITES.swordPickup,
+    getWeaponSprite(pickup.weaponId),
     pickup.x + 4,
     pickup.y + 4 + pulse,
     size - 8,
@@ -2116,7 +2354,7 @@ function drawInventoryItem(
     ctx.font = "9px Arial";
     ctx.fillText("Press 2", centerX, slotY + slotSize - 20);
   } else if (item.type === "weapon" && item.weaponId) {
-    drawSprite(ctx, SPRITES.swordPickup, slotX + 16, slotY + 16, iconSize, iconSize);
+    drawSprite(ctx, getWeaponSprite(item.weaponId), slotX + 16, slotY + 16, iconSize, iconSize);
     const dur = getWeaponDurability(item);
     const maxDur = WEAPONS[item.weaponId].maxDurability;
     ctx.fillStyle = "#fff";
@@ -2318,10 +2556,22 @@ function drawFloorMessage() {
   ctx.textAlign = "left";
 }
 
+function drawObstacles(room: Room) {
+  for (const obstacle of room.obstacles) {
+    const sprite =
+      obstacle.kind === "wall"
+        ? SPRITES.wall
+        : obstacle.kind === "pillar"
+          ? SPRITES.pillar
+          : SPRITES.rock;
+    drawSprite(ctx, sprite, obstacle.x, obstacle.y, obstacle.w, obstacle.h);
+  }
+}
+
 function drawWeaponSwing() {
   const now = performance.now();
 
-  if (now >= weaponSwing.activeUntil) {
+  if (now >= weaponSwing.activeUntil || !weaponSwing.weaponId) {
     return;
   }
 
@@ -2330,10 +2580,17 @@ function drawWeaponSwing() {
   const elapsed = now - weaponSwing.lastAttackAt;
   const rawProgress = Math.min(1, elapsed / weaponSwing.durationMs);
   const progress = 1 - (1 - rawProgress) ** 2;
-  const { start, end } = getSwingArcAngles();
+  const { start, end } = getSwingArcAngles(weaponSwing.swingArcScale);
   const arcStart = start;
   const arcEnd = start + (end - start) * progress;
   const radius = weaponSwing.range * 0.92;
+  const bladeAngle = arcStart + (arcEnd - arcStart) * 0.88;
+  const bladeDist = radius * (weaponSwing.weaponId === "dagger" ? 0.62 : 0.78);
+  const tipX = centerX + Math.cos(bladeAngle) * bladeDist;
+  const tipY = centerY + Math.sin(bladeAngle) * bladeDist;
+  const sprite = getWeaponSprite(weaponSwing.weaponId);
+  const spriteSize = weaponSwing.swingSpriteSize;
+  const trailWidth = weaponSwing.weaponId === "war-axe" ? 6 : weaponSwing.weaponId === "dagger" ? 2.5 : 4;
 
   ctx.save();
   ctx.strokeStyle = weaponSwing.swingColor;
@@ -2343,24 +2600,20 @@ function drawWeaponSwing() {
   ctx.moveTo(centerX, centerY);
   ctx.arc(centerX, centerY, radius, arcStart, arcEnd);
   ctx.closePath();
-  ctx.globalAlpha = 0.28;
+  ctx.globalAlpha = weaponSwing.weaponId === "dagger" ? 0.18 : 0.26;
   ctx.fill();
 
-  ctx.globalAlpha = 0.85;
-  ctx.lineWidth = 4;
+  ctx.globalAlpha = 0.7;
+  ctx.lineWidth = trailWidth;
   ctx.lineCap = "round";
   ctx.beginPath();
   ctx.arc(centerX, centerY, radius, arcStart, arcEnd);
   ctx.stroke();
 
-  const tipX = centerX + Math.cos(arcEnd) * radius;
-  const tipY = centerY + Math.sin(arcEnd) * radius;
   ctx.globalAlpha = 1;
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(centerX, centerY);
-  ctx.lineTo(tipX, tipY);
-  ctx.stroke();
+  ctx.translate(tipX, tipY);
+  ctx.rotate(bladeAngle + Math.PI * 0.68);
+  drawSprite(ctx, sprite, -spriteSize / 2, -spriteSize / 2, spriteSize, spriteSize);
   ctx.restore();
 }
 
@@ -2376,6 +2629,7 @@ function draw() {
   ctx.fillRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
   ctx.globalAlpha = 1;
 
+  drawObstacles(room);
   drawDoors(room);
   drawStairsTiles(room);
   drawWeaponPickup();
@@ -2438,6 +2692,54 @@ function draw() {
   }
 }
 
+function drawMenuArt() {
+  const menuCanvas = document.querySelector<HTMLCanvasElement>("#menu-art");
+
+  if (!menuCanvas) {
+    return;
+  }
+
+  const menuCtx = menuCanvas.getContext("2d");
+
+  if (!menuCtx) {
+    return;
+  }
+
+  const w = menuCanvas.width;
+  const h = menuCanvas.height;
+  const bob = Math.sin(performance.now() / 520) * 4;
+
+  menuCtx.clearRect(0, 0, w, h);
+
+  for (let y = 0; y < h; y += SPRITES.floorTile.height) {
+    for (let x = 0; x < w; x += SPRITES.floorTile.width) {
+      drawSprite(menuCtx, SPRITES.floorTile, x, y);
+    }
+  }
+
+  menuCtx.fillStyle = "rgba(12, 8, 24, 0.45)";
+  menuCtx.fillRect(0, 0, w, h);
+
+  drawSprite(menuCtx, SPRITES.chestClosed, 28, 44 + bob * 0.3, 52, 52);
+  drawSprite(menuCtx, SPRITES.coin, 164, 72 + bob, 30, 30);
+  drawSprite(menuCtx, SPRITES.snakeHead, 248, 54 - bob * 0.4, 44, 44);
+  drawSprite(menuCtx, SPRITES.snakeBody, 286, 58 - bob * 0.4, 36, 36);
+  drawSprite(menuCtx, SPRITES.playerEast, 108, 36 + bob * 0.6, 48, 48);
+  drawSprite(menuCtx, SPRITES.stairsDown, 300, 18, 44, 44);
+
+  menuCtx.fillStyle = "rgba(255, 200, 120, 0.08)";
+  menuCtx.fillRect(0, 0, w, h);
+}
+
+function startMenuArtLoop() {
+  if (state !== "menu") {
+    return;
+  }
+
+  drawMenuArt();
+  requestAnimationFrame(startMenuArtLoop);
+}
+
 function gameLoop() {
   if (state !== "playing") {
     return;
@@ -2450,9 +2752,14 @@ function gameLoop() {
 
 playBtn.addEventListener("click", startGame);
 menuBtn.addEventListener("click", showMenu);
+helpBtn.addEventListener("click", () => setMenuHelpOpen(true));
+helpCloseBtn.addEventListener("click", () => setMenuHelpOpen(false));
 mapBtn.addEventListener("click", toggleMap);
 invBtn.addEventListener("click", toggleInventory);
 canvas.addEventListener("mousedown", handleInventoryMouseDown);
 canvas.addEventListener("mousemove", handleInventoryMouseMove);
 window.addEventListener("mouseup", handleInventoryMouseUp);
 canvas.addEventListener("mouseleave", handleInventoryMouseLeave);
+
+drawMenuArt();
+startMenuArtLoop();

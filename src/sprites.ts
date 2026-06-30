@@ -313,8 +313,33 @@ const potionStrong = buildSprite(
   STRONG,
 );
 
-const swordPickup = buildSprite(
+const RUST = { R: "#c87838", r: "#8a5020", t: "#5a3810" };
+
+const rustySword = buildSprite(
   [
+    ".........lll......",
+    "........lllR......",
+    ".......llrRl......",
+    "......llrRll......",
+    ".....llrRlll......",
+    "....llrRllll......",
+    "...llrRlllll......",
+    "..llrRllllll......",
+    ".llrRlllllll......",
+    "llrRllllllll......",
+    "bbbbbbbbbbbb......",
+    ".bbbbbbbbbb.......",
+    "..bbbbbbbb........",
+    "...bbbbbb.........",
+    "....bbbb..........",
+    ".....bb...........",
+  ],
+  mergePalettes(METAL, LEATHER, RUST),
+);
+
+const ironSword = buildSprite(
+  [
+    "..........ll......",
     ".........lll......",
     "........llll......",
     ".......lllll......",
@@ -325,12 +350,55 @@ const swordPickup = buildSprite(
     "..llllllllll......",
     ".lllllllllll......",
     "llllllllllll......",
+    "llllllllllll......",
     "bbbbbbbbbbbb......",
     ".bbbbbbbbbb.......",
     "..bbbbbbbb........",
     "...bbbbbb.........",
-    "....bbbb..........",
-    ".....bb...........",
+  ],
+  mergePalettes(METAL, LEATHER),
+);
+
+const warAxe = buildSprite(
+  [
+    "......oooooooo......",
+    ".....oOOOOOOOOo.....",
+    "....oOOOOOOOOOOo....",
+    "...oOOOOOrRrOOOOo...",
+    "....oOOOOOOOOOo.....",
+    ".....oOOOOOOOo......",
+    "......bbbbbb........",
+    "......bbbbbb........",
+    ".......bbbb.........",
+    ".......bbbb.........",
+    "........bb..........",
+    "........bb..........",
+    "........bb..........",
+    ".........b..........",
+    ".........b..........",
+    "....................",
+  ],
+  mergePalettes(BRUTE, LEATHER, RUST),
+);
+
+const daggerSprite = buildSprite(
+  [
+    "........ll........",
+    ".......lll........",
+    "......llll........",
+    ".....lllll........",
+    "....llllll........",
+    "...lllllll........",
+    "..llllllll........",
+    "...bbbbbb.........",
+    "...bbbbbb.........",
+    "..bbbbbb..........",
+    "..bbbb............",
+    "...bb.............",
+    "...bb.............",
+    "....................",
+    "....................",
+    "....................",
   ],
   mergePalettes(METAL, LEATHER),
 );
@@ -400,6 +468,68 @@ const floorTile = buildSprite(
   FLOOR,
 );
 
+const rockSprite = buildSprite(
+  [
+    "......zzzzzz......",
+    "....zzZZZZzz....",
+    "...zzZZWWZZzz...",
+    "..zzZZWWWWZZzz..",
+    ".zzZZWWWWWWZZzz.",
+    ".zzZZWWWWWWZZzz.",
+    "..zzZZWWWWZZzz..",
+    "...zzZZWWZZzz...",
+    "....zzZZZZzz....",
+    "......zzzzzz......",
+  ],
+  { z: "#686878", Z: "#888898", W: "#a0a0b0" },
+);
+
+const wallSprite = buildSprite(
+  [
+    "zzZZzzZZzzZZzzZZzz",
+    "ZZzzZZzzZZzzZZzzZZ",
+    "zzZZzzZZzzZZzzZZzz",
+    "ZZzzZZzzZZzzZZzzZZ",
+    "zzZZzzZZzzZZzzZZzz",
+    "ZZzzZZzzZZzzZZzzZZ",
+    "zzZZzzZZzzZZzzZZzz",
+    "ZZzzZZzzZZzzZZzzZZ",
+    "zzZZzzZZzzZZzzZZzz",
+    "ZZzzZZzzZZzzZZzzZZ",
+    "zzZZzzZZzzZZzzZZzz",
+    "ZZzzZZzzZZzzZZzzZZ",
+    "zzZZzzZZzzZZzzZZzz",
+    "ZZzzZZzzZZzzZZzzZZ",
+    "zzZZzzZZzzZZzzZZzz",
+    "ZZzzZZzzZZzzZZzzZZ",
+    "zzZZzzZZzzZZzzZZzz",
+    "ZZzzZZzzZZzzZZzzZZ",
+  ],
+  { z: "#4a4038", Z: "#5c5048" },
+);
+
+const pillarSprite = buildSprite(
+  [
+    "......bbbb......",
+    ".....bbbbbb.....",
+    "....bbbbbbbb....",
+    "...bbbbbbbbbb...",
+    "...bbbbbbbbbb...",
+    "...bbbbbbbbbb...",
+    "...bbbbbbbbbb...",
+    "...bbbbbbbbbb...",
+    "...bbbbbbbbbb...",
+    "...bbbbbbbbbb...",
+    "....bbbbbbbb....",
+    ".....bbbbbb.....",
+    "......bbbb......",
+    ".....bbbbbb.....",
+    "....bbbbbbbb....",
+    "...bbbbbbbbbb...",
+  ],
+  mergePalettes(LEATHER, { z: "#5a5048", Z: "#787068" }),
+);
+
 export const SPRITES: SpriteSheet = {
   playerEast,
   playerWest,
@@ -415,12 +545,31 @@ export const SPRITES: SpriteSheet = {
   chestOpen,
   potionHealth,
   potionStrong,
-  swordPickup,
+  rustySword,
+  ironSword,
+  warAxe,
+  dagger: daggerSprite,
   door: doorSprite,
   stairsDown,
   stairsUp,
   floorTile,
+  rock: rockSprite,
+  pillar: pillarSprite,
+  wall: wallSprite,
 };
+
+export type WeaponSpriteId = "rusty-sword" | "iron-sword" | "war-axe" | "dagger";
+
+const WEAPON_SPRITE_MAP: Record<WeaponSpriteId, HTMLCanvasElement> = {
+  "rusty-sword": rustySword,
+  "iron-sword": ironSword,
+  "war-axe": warAxe,
+  dagger: daggerSprite,
+};
+
+export function getWeaponSprite(weaponId: WeaponSpriteId) {
+  return WEAPON_SPRITE_MAP[weaponId];
+}
 
 export function drawSprite(
   ctx: CanvasRenderingContext2D,

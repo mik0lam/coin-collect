@@ -1,6 +1,6 @@
-# Coin Collect
+# Cavern Crawler
 
-A browser-based dungeon crawler built with TypeScript and Vite. Explore procedurally generated floors, collect coins, loot chests, fight pixel-art mobs, and descend deeper into the dungeon.
+A browser-based dungeon crawler built with TypeScript and Vite. Explore procedurally generated caverns, collect coins, loot chests, fight pixel-art mobs, and descend deeper underground.
 
 ## How to play
 

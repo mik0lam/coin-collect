@@ -8,6 +8,7 @@ A browser-based dungeon crawler built with TypeScript and Vite. Explore procedur
 |--------|----------|
 | Move | `WASD` or `Arrow keys` |
 | Attack (with sword) | `Space` |
+| Map | `M` or **Map** button |
 
 ### Goal
 
@@ -29,7 +30,8 @@ A browser-based dungeon crawler built with TypeScript and Vite. Explore procedur
 - **Depth progression** — snakes get longer and faster as you go deeper
 - **Multiple rooms per floor** — use gold doors on the edges to move between rooms
 - **Center stairs** — down/up stairs are floor tiles in the middle of a room (they do not replace edge doors)
-- **Sword combat** — pick up the sword, face a snake with the white direction indicator, and swing with Space
+- **Map** — press `M` or click **Map** to see only rooms you have explored on the current floor
+- **Sword combat** — pick up the sword, face a snake with the white direction indicator, and swing with Space (25 durability per run; sword breaks when depleted)
 - **HP system** — brief invincibility after each hit; game over only when HP reaches zero
 
 ## Getting started

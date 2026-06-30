@@ -14,6 +14,41 @@ body {
 
 canvas {
   border: 2px solid white;
+  display: block;
+}
+
+.game-wrap {
+  position: relative;
+  width: 800px;
+  height: 500px;
+}
+
+.map-btn {
+  position: absolute;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  padding: 0.35rem 0.9rem;
+  font-size: 13px;
+  font-weight: bold;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #000;
+  background: #c8c8c8;
+  border: 2px solid #fff;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.map-btn:hover {
+  background: #fff;
+  transform: translateX(-50%) scale(1.04);
+}
+
+.map-btn:active {
+  transform: translateX(-50%) scale(0.98);
 }
 
 .menu {

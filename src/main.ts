@@ -21,10 +21,13 @@ app.innerHTML = `
       <p class="menu-tagline">Descend the dungeon. Grab gold. Slay snakes.</p>
       <div class="menu-coin" aria-hidden="true"></div>
       <button id="play-btn" class="menu-btn" type="button">Play</button>
-      <p class="menu-controls">Move with <kbd>WASD</kbd> or <kbd>Arrow keys</kbd><br />Sword in first room · Stairs <kbd>▼</kbd> in room center</p>
+      <p class="menu-controls">Move with <kbd>WASD</kbd> or <kbd>Arrow keys</kbd><br />Sword in first room · Press <kbd>M</kbd> for map</p>
     </div>
   </div>
-  <canvas id="game" class="hidden" width="800" height="500"></canvas>
+  <div id="game-wrap" class="game-wrap hidden">
+    <canvas id="game" width="800" height="500"></canvas>
+    <button id="map-btn" type="button" class="map-btn">Map</button>
+  </div>
   <div id="game-over" class="menu hidden">
     <div class="menu-content">
       <h1 class="game-over-title">Game Over</h1>
@@ -42,6 +45,8 @@ const playBtn = required(
 );
 const canvas = required(document.querySelector<HTMLCanvasElement>("#game"), "Canvas");
 const ctx = required(canvas.getContext("2d"), "Canvas context");
+const gameWrap = required(document.querySelector<HTMLDivElement>("#game-wrap"), "Game wrap");
+const mapBtn = required(document.querySelector<HTMLButtonElement>("#map-btn"), "Map button");
 const gameOverEl = required(document.querySelector<HTMLDivElement>("#game-over"), "Game over screen");
 const menuBtn = required(
   document.querySelector<HTMLButtonElement>("#menu-btn"),
@@ -69,6 +74,8 @@ interface Room {
   id: string;
   name: string;
   background: string;
+  gridX: number;
+  gridY: number;
   exits: Partial<Record<Direction, string>>;
   coin: { x: number; y: number };
   snake: SnakeConfig;
@@ -105,6 +112,7 @@ let runSeed = 0;
 let currentDepth = 1;
 let deepestDepth = 1;
 const floors = new Map<number, Floor>();
+const visitedRooms = new Set<string>();
 let currentRoomId = "";
 
 const player = {
@@ -144,15 +152,23 @@ const SWORD_PICKUP_SIZE = 40;
 const STAIRS_TILE_SIZE = 52;
 const SWORD_START_POSITION = { x: 200, y: 115 };
 const SWORD_TUTORIAL_MS = 6000;
+const SWORD_MAX_DURABILITY = 25;
 const FLOOR_MESSAGE_MS = 2500;
 const DESCEND_BONUS = 15;
 
 let hasSword = false;
+let swordDurability = 0;
 let swordTutorialUntil = 0;
 let floorMessageUntil = 0;
 let floorMessage = "";
 let stairsCooldownUntil = 0;
 const STAIRS_COOLDOWN_MS = 900;
+
+const DOOR_THICKNESS = 10;
+const DOOR_LENGTH = 60;
+const DOOR_HIT_DEPTH = 24;
+
+let mapOpen = false;
 
 let state: GameState = "menu";
 let score = 0;
@@ -175,6 +191,11 @@ window.addEventListener("keydown", (event) => {
   if (key === " " && state === "playing") {
     event.preventDefault();
     tryAttack();
+  }
+
+  if (key === "m" && state === "playing") {
+    event.preventDefault();
+    toggleMap();
   }
 });
 
@@ -283,6 +304,8 @@ function generateFloor(depth: number, seed: number): Floor {
       id: cell.id,
       name: `Depth ${depth} · ${namePart}`,
       background: backgroundForDepth(depth, Math.floor(rng() * 5)),
+      gridX: cell.gx,
+      gridY: cell.gy,
       exits,
       coin: randomPosition(rng),
       snake: generateSnake(depth, rng),
@@ -329,6 +352,16 @@ function getCurrentRoom(): Room {
   return getCurrentFloor().rooms[currentRoomId];
 }
 
+function toggleMap() {
+  mapOpen = !mapOpen;
+  mapBtn.textContent = mapOpen ? "Close" : "Map";
+}
+
+function setMapOpen(open: boolean) {
+  mapOpen = open;
+  mapBtn.textContent = mapOpen ? "Close" : "Map";
+}
+
 function showFloorMessage(message: string) {
   floorMessage = message;
   floorMessageUntil = performance.now() + FLOOR_MESSAGE_MS;
@@ -345,9 +378,43 @@ function applyRoomState(room: Room) {
   weapon.lastAttackAt = 0;
 }
 
+function roomKey(depth: number, roomId: string) {
+  return `${depth}:${roomId}`;
+}
+
+function markRoomVisited(depth = currentDepth, roomId = currentRoomId) {
+  visitedRooms.add(roomKey(depth, roomId));
+}
+
+function isRoomVisited(depth: number, roomId: string) {
+  return visitedRooms.has(roomKey(depth, roomId));
+}
+
+function hasUsableSword() {
+  return hasSword && swordDurability > 0;
+}
+
+function consumeSwordDurability(amount: number) {
+  swordDurability = Math.max(0, swordDurability - amount);
+
+  if (swordDurability <= 0) {
+    hasSword = false;
+    showFloorMessage("Your sword broke!");
+  }
+}
+
 function loadRoom(roomId: string) {
   currentRoomId = roomId;
+  markRoomVisited();
   applyRoomState(getCurrentRoom());
+}
+
+function getExploredDepths() {
+  return [...floors.keys()]
+    .filter((depth) =>
+      Object.values(floors.get(depth)!.rooms).some((room) => isRoomVisited(depth, room.id)),
+    )
+    .sort((a, b) => a - b);
 }
 
 function spawnFromDirection(direction: Direction) {
@@ -426,10 +493,13 @@ function resetGame() {
   hp.current = hp.max;
   invincibleUntil = 0;
   hasSword = false;
+  swordDurability = 0;
   swordTutorialUntil = 0;
   floorMessageUntil = 0;
   floorMessage = "";
   stairsCooldownUntil = 0;
+  visitedRooms.clear();
+  setMapOpen(false);
   playerFacing = "east";
   player.x = 100;
   player.y = 100;
@@ -496,7 +566,7 @@ function slaySnake() {
 }
 
 function tryAttack() {
-  if (!hasSword) {
+  if (!hasUsableSword()) {
     return;
   }
 
@@ -508,6 +578,7 @@ function tryAttack() {
 
   weapon.lastAttackAt = now;
   weapon.activeUntil = now + weapon.durationMs;
+  consumeSwordDurability(1);
   checkWeaponHits();
 }
 
@@ -533,6 +604,7 @@ function tryPickupSword() {
     )
   ) {
     hasSword = true;
+    swordDurability = SWORD_MAX_DURABILITY;
     swordTutorialUntil = performance.now() + SWORD_TUTORIAL_MS;
   }
 }
@@ -585,9 +657,10 @@ function updateFacing() {
 function showMenu() {
   state = "menu";
   keys.clear();
+  setMapOpen(false);
 
   gameOverEl.classList.add("hidden");
-  canvas.classList.add("hidden");
+  gameWrap.classList.add("hidden");
   menuEl.classList.remove("hidden");
 }
 
@@ -597,17 +670,18 @@ function startGame() {
 
   gameOverEl.classList.add("hidden");
   menuEl.classList.add("hidden");
-  canvas.classList.remove("hidden");
+  gameWrap.classList.remove("hidden");
   gameLoop();
 }
 
 function endGame() {
   state = "gameover";
   keys.clear();
+  setMapOpen(false);
   finalScoreEl.textContent = String(score);
   finalDepthEl.textContent = String(deepestDepth);
 
-  canvas.classList.add("hidden");
+  gameWrap.classList.add("hidden");
   gameOverEl.classList.remove("hidden");
 }
 
@@ -651,26 +725,68 @@ function tryUseStairs() {
   }
 }
 
+function getDoorHitbox(direction: Direction, room: Room) {
+  if (!room.exits[direction]) {
+    return null;
+  }
+
+  const centerX = PLAY_WIDTH / 2 - DOOR_LENGTH / 2;
+  const centerY = PLAY_HEIGHT / 2 - DOOR_LENGTH / 2;
+
+  switch (direction) {
+    case "north":
+      return { x: centerX, y: 0, w: DOOR_LENGTH, h: DOOR_HIT_DEPTH };
+    case "south":
+      return {
+        x: centerX,
+        y: PLAY_HEIGHT - DOOR_HIT_DEPTH,
+        w: DOOR_LENGTH,
+        h: DOOR_HIT_DEPTH,
+      };
+    case "west":
+      return { x: 0, y: centerY, w: DOOR_HIT_DEPTH, h: DOOR_LENGTH };
+    case "east":
+      return {
+        x: PLAY_WIDTH - DOOR_HIT_DEPTH,
+        y: centerY,
+        w: DOOR_HIT_DEPTH,
+        h: DOOR_LENGTH,
+      };
+  }
+}
+
 function tryChangeRoom() {
   const room = getCurrentRoom();
+  const playerBox = { x: player.x, y: player.y, w: player.size, h: player.size };
 
-  if (player.x < 0 && room.exits.west) {
-    changeRoom(room.exits.west, "east");
+  const attempts: { direction: Direction; moveKeys: string[]; enteredFrom: Direction }[] = [
+    { direction: "west", moveKeys: ["a", "arrowleft"], enteredFrom: "east" },
+    { direction: "east", moveKeys: ["d", "arrowright"], enteredFrom: "west" },
+    { direction: "north", moveKeys: ["w", "arrowup"], enteredFrom: "south" },
+    { direction: "south", moveKeys: ["s", "arrowdown"], enteredFrom: "north" },
+  ];
+
+  for (const attempt of attempts) {
+    const exitId = room.exits[attempt.direction];
+
+    if (!exitId) {
+      continue;
+    }
+
+    const hitbox = getDoorHitbox(attempt.direction, room);
+
+    if (!hitbox) {
+      continue;
+    }
+
+    const isMovingOut = attempt.moveKeys.some((key) => keys.has(key));
+
+    if (!isMovingOut || !boxesOverlap(playerBox, hitbox)) {
+      continue;
+    }
+
+    changeRoom(exitId, attempt.enteredFrom);
     return;
-  }
-
-  if (player.x + player.size > PLAY_WIDTH && room.exits.east) {
-    changeRoom(room.exits.east, "west");
-    return;
-  }
-
-  if (player.y < 0 && room.exits.north) {
-    changeRoom(room.exits.north, "south");
-    return;
-  }
-
-  if (player.y + player.size > PLAY_HEIGHT && room.exits.south) {
-    changeRoom(room.exits.south, "north");
   }
 }
 
@@ -789,6 +905,10 @@ function updateWeapon() {
 }
 
 function update() {
+  if (mapOpen) {
+    return;
+  }
+
   movePlayer();
   updateSnakeRespawn();
   moveSnake();
@@ -860,13 +980,18 @@ function drawHud() {
   ctx.fillText("HP", 280, 58);
   drawHpBar(308, 44, 140, 18);
 
-  const cooldownReady = performance.now() >= weapon.lastAttackAt + weapon.cooldownMs;
   ctx.font = "14px Arial";
   ctx.textAlign = "right";
 
-  if (hasSword) {
+  if (hasUsableSword()) {
+    const cooldownReady = performance.now() >= weapon.lastAttackAt + weapon.cooldownMs;
     ctx.fillStyle = cooldownReady ? "#ff8844" : "#555";
-    ctx.fillText(cooldownReady ? "Sword ready" : "Sword cooling...", canvas.width - 20, 58);
+    ctx.fillText(
+      cooldownReady ? `Sword ${swordDurability}/${SWORD_MAX_DURABILITY}` : "Sword cooling...",
+      canvas.width - 20,
+      58,
+    );
+    drawDurabilityBar(canvas.width - 148, 62, 128, 8);
   } else {
     ctx.fillStyle = "#666";
     ctx.fillText("No weapon equipped", canvas.width - 20, 58);
@@ -875,28 +1000,213 @@ function drawHud() {
   ctx.textAlign = "left";
 }
 
+function drawDurabilityBar(x: number, y: number, width: number, height: number) {
+  const fillRatio = swordDurability / SWORD_MAX_DURABILITY;
+
+  ctx.fillStyle = "#333";
+  ctx.fillRect(x, y, width, height);
+
+  if (fillRatio > 0.5) {
+    ctx.fillStyle = "#ff8844";
+  } else if (fillRatio > 0.25) {
+    ctx.fillStyle = "#ffaa00";
+  } else {
+    ctx.fillStyle = "#ff4444";
+  }
+
+  ctx.fillRect(x, y, width * fillRatio, height);
+
+  ctx.strokeStyle = "#888";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x, y, width, height);
+}
+
+function getRoomMapCenter(
+  room: Room,
+  minGridX: number,
+  minGridY: number,
+  cellSize: number,
+  originX: number,
+  originY: number,
+) {
+  return {
+    x: originX + (room.gridX - minGridX) * cellSize + cellSize / 2,
+    y: originY + (room.gridY - minGridY) * cellSize + cellSize / 2,
+  };
+}
+
+function drawMapOverlay() {
+  const floor = getCurrentFloor();
+  const visitedOnFloor = Object.values(floor.rooms).filter((room) =>
+    isRoomVisited(currentDepth, room.id),
+  );
+
+  if (visitedOnFloor.length === 0) {
+    return;
+  }
+
+  let minGridX = Infinity;
+  let maxGridX = -Infinity;
+  let minGridY = Infinity;
+  let maxGridY = -Infinity;
+
+  for (const room of visitedOnFloor) {
+    minGridX = Math.min(minGridX, room.gridX);
+    maxGridX = Math.max(maxGridX, room.gridX);
+    minGridY = Math.min(minGridY, room.gridY);
+    maxGridY = Math.max(maxGridY, room.gridY);
+  }
+
+  const gridWidth = maxGridX - minGridX + 1;
+  const gridHeight = maxGridY - minGridY + 1;
+  const cellSize = Math.min(58, 360 / Math.max(gridWidth, gridHeight));
+  const mapWidth = gridWidth * cellSize;
+  const mapHeight = gridHeight * cellSize;
+  const originX = (PLAY_WIDTH - mapWidth) / 2;
+  const originY = HUD_HEIGHT + (PLAY_HEIGHT - mapHeight) / 2 - 24;
+
+  ctx.fillStyle = "rgba(0, 0, 0, 0.82)";
+  ctx.fillRect(0, HUD_HEIGHT, PLAY_WIDTH, PLAY_HEIGHT);
+
+  ctx.fillStyle = "#1a1a1a";
+  ctx.fillRect(originX - 20, originY - 52, mapWidth + 40, mapHeight + 88);
+  ctx.strokeStyle = "#666";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(originX - 20, originY - 52, mapWidth + 40, mapHeight + 88);
+
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 20px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText(`Map — Depth ${currentDepth}`, PLAY_WIDTH / 2, originY - 28);
+
+  ctx.font = "13px Arial";
+  ctx.fillStyle = "#aaa";
+  ctx.fillText("Only rooms you have explored are shown", PLAY_WIDTH / 2, originY - 10);
+
+  ctx.strokeStyle = "#555";
+  ctx.lineWidth = 2;
+
+  for (const room of visitedOnFloor) {
+    for (const [direction, neighborId] of Object.entries(room.exits)) {
+      if (!neighborId || direction === "south" || direction === "east") {
+        continue;
+      }
+
+      if (!isRoomVisited(currentDepth, neighborId)) {
+        continue;
+      }
+
+      const neighbor = floor.rooms[neighborId];
+
+      if (!neighbor) {
+        continue;
+      }
+
+      const from = getRoomMapCenter(room, minGridX, minGridY, cellSize, originX, originY);
+      const to = getRoomMapCenter(neighbor, minGridX, minGridY, cellSize, originX, originY);
+
+      ctx.beginPath();
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo(to.x, to.y);
+      ctx.stroke();
+    }
+  }
+
+  for (const room of visitedOnFloor) {
+    const x = originX + (room.gridX - minGridX) * cellSize;
+    const y = originY + (room.gridY - minGridY) * cellSize;
+    const isCurrent = room.id === currentRoomId;
+    const isStart = room.id === floor.startRoomId;
+    const isStairsDown = room.id === floor.stairsDownRoomId;
+
+    if (isStairsDown) {
+      ctx.fillStyle = "rgba(180, 90, 255, 0.55)";
+    } else if (isStart) {
+      ctx.fillStyle = "rgba(80, 180, 100, 0.45)";
+    } else {
+      ctx.fillStyle = "#2a2a2a";
+    }
+
+    ctx.fillRect(x + 2, y + 2, cellSize - 4, cellSize - 4);
+
+    ctx.strokeStyle = isCurrent ? "#00ffff" : "#888";
+    ctx.lineWidth = isCurrent ? 3 : 1;
+    ctx.strokeRect(x + 2, y + 2, cellSize - 4, cellSize - 4);
+
+    if (room.stairsDownTile) {
+      ctx.fillStyle = "#e0b0ff";
+      ctx.font = "bold 12px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText("▼", x + cellSize / 2, y + cellSize / 2 + 4);
+    }
+
+    if (room.stairsUpTile) {
+      ctx.fillStyle = "#b0e0ff";
+      ctx.font = "bold 12px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText("▲", x + cellSize / 2, y + cellSize / 2 + 4);
+    }
+
+    if (isCurrent) {
+      ctx.fillStyle = "#00ffff";
+      ctx.beginPath();
+      ctx.arc(x + cellSize / 2, y + cellSize / 2, 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  const exploredDepths = getExploredDepths();
+  const depthListX = originX + mapWidth + 28;
+  let depthListY = originY;
+
+  ctx.textAlign = "left";
+  ctx.fillStyle = "#ccc";
+  ctx.font = "bold 13px Arial";
+  ctx.fillText("Floors", depthListX, depthListY);
+  depthListY += 18;
+
+  ctx.font = "12px Arial";
+
+  for (const depth of exploredDepths) {
+    const isCurrentDepth = depth === currentDepth;
+
+    ctx.fillStyle = isCurrentDepth ? "#00ffff" : "#888";
+    ctx.fillText(isCurrentDepth ? `▸ Depth ${depth}` : `  Depth ${depth}`, depthListX, depthListY);
+    depthListY += 16;
+  }
+
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#888";
+  ctx.font = "13px Arial";
+  ctx.fillText("Press M or Map to close", PLAY_WIDTH / 2, originY + mapHeight + 24);
+  ctx.textAlign = "left";
+}
+
 function drawDoors(room: Room) {
-  const doorThickness = 10;
-  const doorLength = 60;
-  const centerX = PLAY_WIDTH / 2 - doorLength / 2;
-  const centerY = HUD_HEIGHT + PLAY_HEIGHT / 2 - doorLength / 2;
+  const centerX = PLAY_WIDTH / 2 - DOOR_LENGTH / 2;
+  const centerY = HUD_HEIGHT + PLAY_HEIGHT / 2 - DOOR_LENGTH / 2;
 
   ctx.fillStyle = "rgba(255, 215, 0, 0.45)";
 
   if (room.exits.north) {
-    ctx.fillRect(centerX, HUD_HEIGHT, doorLength, doorThickness);
+    ctx.fillRect(centerX, HUD_HEIGHT, DOOR_LENGTH, DOOR_THICKNESS);
   }
 
   if (room.exits.south) {
-    ctx.fillRect(centerX, HUD_HEIGHT + PLAY_HEIGHT - doorThickness, doorLength, doorThickness);
+    ctx.fillRect(
+      centerX,
+      HUD_HEIGHT + PLAY_HEIGHT - DOOR_THICKNESS,
+      DOOR_LENGTH,
+      DOOR_THICKNESS,
+    );
   }
 
   if (room.exits.west) {
-    ctx.fillRect(0, centerY, doorThickness, doorLength);
+    ctx.fillRect(0, centerY, DOOR_THICKNESS, DOOR_LENGTH);
   }
 
   if (room.exits.east) {
-    ctx.fillRect(PLAY_WIDTH - doorThickness, centerY, doorThickness, doorLength);
+    ctx.fillRect(PLAY_WIDTH - DOOR_THICKNESS, centerY, DOOR_THICKNESS, DOOR_LENGTH);
   }
 }
 
@@ -1033,7 +1343,7 @@ function drawSwordTutorial() {
   ctx.fillStyle = "#ffffff";
   ctx.font = "16px Arial";
   ctx.fillText(
-    "Press SPACE to swing in the direction you're facing.",
+    "Press SPACE to swing. Each swing uses durability.",
     PLAY_WIDTH / 2,
     bannerY + 50,
   );
@@ -1065,7 +1375,7 @@ function drawFloorMessage() {
 }
 
 function drawEquippedSwordIcon(screenX: number, screenY: number) {
-  if (!hasSword) {
+  if (!hasUsableSword()) {
     return;
   }
 
@@ -1079,7 +1389,7 @@ function drawEquippedSwordIcon(screenX: number, screenY: number) {
 }
 
 function drawWeaponSwing() {
-  if (!hasSword) {
+  if (!hasUsableSword()) {
     return;
   }
 
@@ -1149,6 +1459,10 @@ function draw() {
     );
     ctx.textAlign = "left";
   }
+
+  if (mapOpen) {
+    drawMapOverlay();
+  }
 }
 
 function gameLoop() {
@@ -1163,3 +1477,4 @@ function gameLoop() {
 
 playBtn.addEventListener("click", startGame);
 menuBtn.addEventListener("click", showMenu);
+mapBtn.addEventListener("click", toggleMap);

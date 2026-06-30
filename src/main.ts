@@ -2,6 +2,7 @@ import "./style.css";
 import { SPRITES, drawSprite, drawSpriteCentered, drawTintedSprite, getWeaponSprite, FLOOR_TILES } from "./sprites";
 import { loadAssetSprites, HERO_DRAW_SIZE, HERO_HITBOX_INSET, HERO_HITBOX_SIZE, TILE_DRAW_SIZE, TILE_SCALE } from "./spriteAssets";
 import { loadGolemSprites, areGolemSpritesLoaded, getLaserFrame } from "./golemSprites";
+import { clampDeltaMs, deltaScale, TARGET_FRAME_MS } from "./timing";
 import {
   getLegendaryWeaponPool,
   resetLegendaryPool,
@@ -430,6 +431,7 @@ const hp = {
 };
 
 let invincibleUntil = 0;
+let lastUpdateTime = 0;
 
 const keys = new Set<string>();
 
@@ -1477,6 +1479,7 @@ function resetGame() {
   stairsPrompt = null;
   stairsDismissedUntilLeave = false;
   playerGolemBeams.length = 0;
+  lastUpdateTime = 0;
   hasDash = false;
   dashCooldownUntil = 0;
   dashActiveUntil = 0;
@@ -2184,12 +2187,12 @@ function tryChangeRoom() {
   }
 }
 
-function movePlayer() {
+function movePlayer(dt: number) {
   const prevX = player.x;
   const prevY = player.y;
 
   if (performance.now() < dashActiveUntil) {
-    const burst = DASH_SPEED;
+    const burst = DASH_SPEED * dt;
 
     switch (dashDirection) {
       case "north":
@@ -2207,19 +2210,19 @@ function movePlayer() {
     }
   } else {
     if (keys.has("w") || keys.has("arrowup")) {
-      player.y -= player.speed;
+      player.y -= player.speed * dt;
     }
 
     if (keys.has("s") || keys.has("arrowdown")) {
-      player.y += player.speed;
+      player.y += player.speed * dt;
     }
 
     if (keys.has("a") || keys.has("arrowleft")) {
-      player.x -= player.speed;
+      player.x -= player.speed * dt;
     }
 
     if (keys.has("d") || keys.has("arrowright")) {
-      player.x += player.speed;
+      player.x += player.speed * dt;
     }
   }
 
@@ -2308,7 +2311,7 @@ function tryCollectCoin() {
   score += 1;
 }
 
-function moveMob(mob: RuntimeMob) {
+function moveMob(mob: RuntimeMob, dt: number) {
   if (!isMobAlive(mob)) {
     return;
   }
@@ -2323,8 +2326,8 @@ function moveMob(mob: RuntimeMob) {
   const distance = Math.sqrt(dx * dx + dy * dy);
 
   if (distance > 0) {
-    head.x += (dx / distance) * mob.speed;
-    head.y += (dy / distance) * mob.speed;
+    head.x += (dx / distance) * mob.speed * dt;
+    head.y += (dy / distance) * mob.speed * dt;
   }
 
   clampMobToRoom(mob, 0);
@@ -2339,8 +2342,8 @@ function moveMob(mob: RuntimeMob) {
       const spacing = mob.size + 4;
 
       if (followDistance > spacing) {
-        current.x += (followDx / followDistance) * mob.speed;
-        current.y += (followDy / followDistance) * mob.speed;
+        current.x += (followDx / followDistance) * mob.speed * dt;
+        current.y += (followDy / followDistance) * mob.speed * dt;
       }
 
       clampMobToRoom(mob, i);
@@ -2348,7 +2351,7 @@ function moveMob(mob: RuntimeMob) {
   }
 }
 
-function moveMobs() {
+function moveMobs(dt: number) {
   for (const mob of activeMobs) {
     if (mob.type === "boss" && mob.golemState) {
       if (mob.golemState.phase !== "dying") {
@@ -2359,12 +2362,13 @@ function moveMobs() {
           playerHitbox.x,
           playerHitbox.y,
           playerHitbox.w,
+          dt,
           (target) => clampMobToRoom(target, 0),
           takeDamage,
         );
       }
     } else {
-      moveMob(mob);
+      moveMob(mob, dt);
     }
   }
 
@@ -2734,6 +2738,9 @@ function tryOpenChest() {
 
 function update() {
   const now = performance.now();
+  const deltaMs = lastUpdateTime === 0 ? TARGET_FRAME_MS : clampDeltaMs(now - lastUpdateTime);
+  lastUpdateTime = now;
+  const dt = deltaScale(deltaMs);
 
   for (let i = playerGolemBeams.length - 1; i >= 0; i--) {
     if (playerGolemBeams[i].activeUntil <= now) {
@@ -2748,8 +2755,8 @@ function update() {
   const spinning = slotSpin.activeUntil > performance.now();
 
   if (!spinning && !shopOpen) {
-    movePlayer();
-    moveMobs();
+    movePlayer(dt);
+    moveMobs(dt);
     updateWeapon();
 
     const contactDamage = isPlayerHitByMobs();

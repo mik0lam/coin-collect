@@ -246,6 +246,7 @@ export function updateGolemBoss(
   playerX: number,
   playerY: number,
   playerSize: number,
+  dt: number,
   clamp: (mob: RuntimeMob) => void,
   onPlayerHit: (damage: number) => void,
 ) {
@@ -265,9 +266,9 @@ export function updateGolemBoss(
 
   for (let i = rocks.length - 1; i >= 0; i--) {
     const rock = rocks[i];
-    rock.x += rock.vx;
-    rock.y += rock.vy;
-    rock.rotation += rock.spin;
+    rock.x += rock.vx * dt;
+    rock.y += rock.vy * dt;
+    rock.rotation += rock.spin * dt;
 
     if (
       playerBoxOverlaps(playerX, playerY, playerSize, playerSize, rock.x, rock.y, rock.size)
@@ -356,8 +357,8 @@ export function updateGolemBoss(
   const stopDistance = Math.round(96 * GOLEM_SCALE);
 
   if (dist > stopDistance) {
-    head.x += (dx / dist) * mob.speed;
-    head.y += (dy / dist) * mob.speed;
+    head.x += (dx / dist) * mob.speed * dt;
+    head.y += (dy / dist) * mob.speed * dt;
     clamp(mob);
     state.phase = "chase";
     setAnim(state, "walk");

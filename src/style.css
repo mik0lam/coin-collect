@@ -5,7 +5,7 @@ body {
   justify-content: center;
   align-items: center;
   height: 100vh;
-  font-family: Arial, sans-serif;
+  font-family: "Segoe UI", Arial, sans-serif;
 }
 
 .hidden {
@@ -13,26 +13,151 @@ body {
 }
 
 canvas {
-  border: 2px solid white;
+  border: 2px solid #444;
+  border-top: none;
   display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
 }
 
 .game-wrap {
-  position: relative;
   width: 800px;
-  height: 500px;
+  box-sizing: border-box;
+  border: 2px solid white;
+  background: #000;
 }
 
-.map-btn {
-  position: absolute;
-  top: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 2;
-  padding: 0.35rem 0.9rem;
+.game-hud {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr 1.6fr auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 56px;
+  padding: 8px 12px;
+  background: #141414;
+  border-bottom: 2px solid #333;
+  color: #ddd;
   font-size: 13px;
-  font-weight: bold;
+}
+
+.hud-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.hud-stats {
+  flex-wrap: wrap;
+}
+
+.hud-label {
+  color: #888;
+  font-size: 11px;
+  text-transform: uppercase;
   letter-spacing: 0.06em;
+}
+
+.hud-value {
+  color: gold;
+  font-size: 16px;
+}
+
+.hud-divider {
+  width: 1px;
+  height: 20px;
+  background: #333;
+  margin: 0 4px;
+}
+
+.hud-room-wrap {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.hud-room {
+  color: #ccc;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.hud-items {
+  color: #a080ff;
+  font-size: 11px;
+}
+
+.hud-bars {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.hud-hp,
+.hud-weapon {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hud-bar {
+  flex: 1;
+  height: 8px;
+  background: #2a2a2a;
+  border: 1px solid #555;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.hud-bar-fill {
+  height: 100%;
+  transition: width 0.15s ease;
+}
+
+.hp-fill {
+  background: linear-gradient(90deg, #44cc44, #88ff88);
+}
+
+.dur-fill {
+  background: linear-gradient(90deg, #cc6622, #ff9944);
+}
+
+.hud-bar-text {
+  min-width: 28px;
+  text-align: right;
+  font-size: 12px;
+  color: #fff;
+}
+
+.hud-weapon-name {
+  min-width: 88px;
+  font-size: 11px;
+  color: #aaa;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hud-weapon-ready {
+  color: #ff9944;
+}
+
+.hud-weapon-cooldown {
+  color: #666;
+}
+
+.hud-actions {
+  gap: 6px;
+}
+
+.hud-btn {
+  padding: 0.35rem 0.75rem;
+  font-size: 12px;
+  font-weight: bold;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   color: #000;
   background: #c8c8c8;
@@ -42,13 +167,31 @@ canvas {
   transition: background 0.15s ease, transform 0.15s ease;
 }
 
-.map-btn:hover {
+.hud-btn:hover {
   background: #fff;
-  transform: translateX(-50%) scale(1.04);
+  transform: scale(1.03);
 }
 
-.map-btn:active {
-  transform: translateX(-50%) scale(0.98);
+.hud-btn:active {
+  transform: scale(0.98);
+}
+
+.hud-btn-accent {
+  background: #c8a0ff;
+}
+
+.hud-btn-accent:hover {
+  background: #e0c8ff;
+}
+
+.game-hint {
+  margin: 0;
+  padding: 6px 12px 8px;
+  font-size: 11px;
+  color: #666;
+  text-align: center;
+  background: #0a0a0a;
+  border-top: 1px solid #222;
 }
 
 .menu {
@@ -91,6 +234,7 @@ canvas {
   border-radius: 4px;
   box-shadow: 0 0 24px rgba(255, 215, 0, 0.6);
   animation: coin-bob 1.5s ease-in-out infinite;
+  image-rendering: pixelated;
 }
 
 @keyframes coin-bob {

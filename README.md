@@ -1,20 +1,21 @@
 # Coin Collect
 
-A browser-based dungeon crawler built with TypeScript and Vite. Explore procedurally generated floors, collect coins, find a sword, fight snakes, and descend deeper into the dungeon.
+A browser-based dungeon crawler built with TypeScript and Vite. Explore procedurally generated floors, collect coins, loot chests, fight pixel-art mobs, and descend deeper into the dungeon.
 
 ## How to play
 
 | Action | Controls |
 |--------|----------|
 | Move | `WASD` or `Arrow keys` |
-| Attack (with sword) | `Space` |
+| Attack | `Space` |
 | Map | `M` or **Map** button |
+| Inventory | `I` or **Inv** button — `1` health potion, `2` strong potion |
 
 ### Goal
 
 - Collect **gold coins** for points
 - Survive snake attacks — you have an **HP bar**, not instant death
-- Find the **sword** in your first room on Depth 1
+- You start with a **rusty sword**; find better weapons in chests
 - Locate the **▼ Down** stairs (purple tile in the **center** of a room) to reach deeper, harder floors
 - Go as deep as you can and rack up a high **score**
 
@@ -31,7 +32,9 @@ A browser-based dungeon crawler built with TypeScript and Vite. Explore procedur
 - **Multiple rooms per floor** — use gold doors on the edges to move between rooms
 - **Center stairs** — down/up stairs are floor tiles in the middle of a room (they do not replace edge doors)
 - **Map** — press `M` or click **Map** to see only rooms you have explored on the current floor
-- **Sword combat** — pick up the sword, face a snake with the white direction indicator, and swing with Space (25 durability per run; sword breaks when depleted)
+- **Potions & inventory** — purple potions on the floor restore HP; collect up to 6 and drink with `1` (health) or `2` (strong)
+- **Mobs** — snakes, slimes, wraiths, and brutes with different speed, HP, and damage
+- **Weapons & chests** — gold chests contain iron swords, war axes, daggers, and potions; swings knock enemies back
 - **HP system** — brief invincibility after each hit; game over only when HP reaches zero
 
 ## Getting started

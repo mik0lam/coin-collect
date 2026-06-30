@@ -1,4 +1,5 @@
 import "./style.css";
+import { SPRITES, drawSprite, drawSpriteCentered, drawTintedSprite } from "./sprites";
 
 function required<T>(value: T | null | undefined, name: string): T {
   if (value == null) {
@@ -18,20 +19,52 @@ app.innerHTML = `
   <div id="menu" class="menu">
     <div class="menu-content">
       <h1 class="menu-title">Coin Collect</h1>
-      <p class="menu-tagline">Descend the dungeon. Grab gold. Slay snakes.</p>
+      <p class="menu-tagline">Descend the dungeon. Loot chests. Slay mobs.</p>
       <div class="menu-coin" aria-hidden="true"></div>
       <button id="play-btn" class="menu-btn" type="button">Play</button>
-      <p class="menu-controls">Move with <kbd>WASD</kbd> or <kbd>Arrow keys</kbd><br />Sword in first room · Press <kbd>M</kbd> for map</p>
+      <p class="menu-controls">Move with <kbd>WASD</kbd> or <kbd>Arrow keys</kbd><br />Press <kbd>Space</kbd> to attack · <kbd>I</kbd> inventory · <kbd>1</kbd>/<kbd>2</kbd> potions</p>
     </div>
   </div>
   <div id="game-wrap" class="game-wrap hidden">
-    <canvas id="game" width="800" height="500"></canvas>
-    <button id="map-btn" type="button" class="map-btn">Map</button>
+    <header id="game-hud" class="game-hud">
+      <div class="hud-group hud-stats">
+        <span class="hud-label">Score</span>
+        <strong id="hud-score" class="hud-value">0</strong>
+        <span class="hud-divider" aria-hidden="true"></span>
+        <span class="hud-label">Depth</span>
+        <strong id="hud-depth" class="hud-value">1</strong>
+      </div>
+      <div class="hud-group hud-room-wrap">
+        <span id="hud-room" class="hud-room">Depth 1</span>
+        <span id="hud-items" class="hud-items">0/6 items</span>
+      </div>
+      <div class="hud-group hud-bars">
+        <div class="hud-hp">
+          <span class="hud-label">HP</span>
+          <div class="hud-bar hp-bar" aria-hidden="true">
+            <div id="hud-hp-fill" class="hud-bar-fill hp-fill"></div>
+          </div>
+          <span id="hud-hp-text" class="hud-bar-text">100</span>
+        </div>
+        <div class="hud-weapon">
+          <span id="hud-weapon-name" class="hud-weapon-name">Rusty Sword</span>
+          <div class="hud-bar dur-bar" aria-hidden="true">
+            <div id="hud-dur-fill" class="hud-bar-fill dur-fill"></div>
+          </div>
+        </div>
+      </div>
+      <div class="hud-group hud-actions">
+        <button id="map-btn" type="button" class="hud-btn">Map</button>
+        <button id="inv-btn" type="button" class="hud-btn hud-btn-accent">Inv</button>
+      </div>
+    </header>
+    <canvas id="game" width="800" height="444"></canvas>
+    <p class="game-hint">WASD move · Space attack · 1/2 potions · M map · I inventory</p>
   </div>
   <div id="game-over" class="menu hidden">
     <div class="menu-content">
       <h1 class="game-over-title">Game Over</h1>
-      <p class="game-over-message">The snake got you!</p>
+      <p class="game-over-message">The dungeon got you!</p>
       <p class="game-over-score">Depth <span id="final-depth">1</span> · Score <span id="final-score">0</span></p>
       <button id="menu-btn" class="menu-btn" type="button">Main Menu</button>
     </div>
@@ -47,6 +80,7 @@ const canvas = required(document.querySelector<HTMLCanvasElement>("#game"), "Can
 const ctx = required(canvas.getContext("2d"), "Canvas context");
 const gameWrap = required(document.querySelector<HTMLDivElement>("#game-wrap"), "Game wrap");
 const mapBtn = required(document.querySelector<HTMLButtonElement>("#map-btn"), "Map button");
+const invBtn = required(document.querySelector<HTMLButtonElement>("#inv-btn"), "Inventory button");
 const gameOverEl = required(document.querySelector<HTMLDivElement>("#game-over"), "Game over screen");
 const menuBtn = required(
   document.querySelector<HTMLButtonElement>("#menu-btn"),
@@ -60,14 +94,76 @@ const finalDepthEl = required(
   document.querySelector<HTMLSpanElement>("#final-depth"),
   "Final depth",
 );
+const hudScoreEl = required(document.querySelector<HTMLElement>("#hud-score"), "HUD score");
+const hudDepthEl = required(document.querySelector<HTMLElement>("#hud-depth"), "HUD depth");
+const hudRoomEl = required(document.querySelector<HTMLElement>("#hud-room"), "HUD room");
+const hudItemsEl = required(document.querySelector<HTMLElement>("#hud-items"), "HUD items");
+const hudHpFillEl = required(document.querySelector<HTMLElement>("#hud-hp-fill"), "HUD HP fill");
+const hudHpTextEl = required(document.querySelector<HTMLElement>("#hud-hp-text"), "HUD HP text");
+const hudWeaponNameEl = required(
+  document.querySelector<HTMLElement>("#hud-weapon-name"),
+  "HUD weapon name",
+);
+const hudDurFillEl = required(document.querySelector<HTMLElement>("#hud-dur-fill"), "HUD durability fill");
 
 type GameState = "menu" | "playing" | "gameover";
 type Direction = "north" | "south" | "east" | "west";
+type MobType = "snake" | "slime" | "wraith" | "brute";
+type WeaponId = "rusty-sword" | "iron-sword" | "war-axe" | "dagger";
+type InventoryItemType = "health-potion" | "strong-potion" | "weapon";
 
-interface SnakeConfig {
+interface WeaponDef {
+  damage: number;
+  knockback: number;
+  range: number;
+  width: number;
+  cooldownMs: number;
+  durationMs: number;
+  maxDurability: number;
+  name: string;
+  swingColor: string;
+}
+
+interface MobConfig {
+  type: MobType;
   segments: { x: number; y: number }[];
   size: number;
   speed: number;
+  maxHp: number;
+  contactDamage: number;
+  currentHp?: number;
+  respawnAt?: number;
+}
+
+interface RuntimeMob {
+  configIndex: number;
+  type: MobType;
+  segments: { x: number; y: number }[];
+  size: number;
+  speed: number;
+  hp: number;
+  maxHp: number;
+  contactDamage: number;
+  deadUntil: number;
+  hitFlashUntil: number;
+}
+
+type ChestLoot =
+  | { kind: "weapon"; weaponId: WeaponId }
+  | { kind: "health-potion"; healAmount: number }
+  | { kind: "strong-potion"; healAmount: number };
+
+interface Chest {
+  x: number;
+  y: number;
+  opened: boolean;
+  loot: ChestLoot;
+}
+
+interface InventoryItem {
+  type: InventoryItemType;
+  healAmount?: number;
+  weaponId?: WeaponId;
 }
 
 interface Room {
@@ -78,8 +174,12 @@ interface Room {
   gridY: number;
   exits: Partial<Record<Direction, string>>;
   coin: { x: number; y: number };
-  snake: SnakeConfig;
-  swordPickup?: { x: number; y: number };
+  enemies: MobConfig[];
+  weaponPickup?: { x: number; y: number; weaponId: WeaponId };
+  potionPickup?: { x: number; y: number };
+  potionHeal?: number;
+  potionCollected?: boolean;
+  chest?: Chest;
   stairsDownTile?: { x: number; y: number };
   stairsUpTile?: { x: number; y: number };
 }
@@ -91,9 +191,69 @@ interface Floor {
   stairsDownRoomId: string;
 }
 
-const HUD_HEIGHT = 72;
+const WEAPONS: Record<WeaponId, WeaponDef> = {
+  "rusty-sword": {
+    damage: 1,
+    knockback: 18,
+    range: 44,
+    width: 38,
+    cooldownMs: 480,
+    durationMs: 160,
+    maxDurability: 25,
+    name: "Rusty Sword",
+    swingColor: "rgba(255, 120, 40, 0.85)",
+  },
+  "iron-sword": {
+    damage: 2,
+    knockback: 22,
+    range: 48,
+    width: 40,
+    cooldownMs: 420,
+    durationMs: 150,
+    maxDurability: 40,
+    name: "Iron Sword",
+    swingColor: "rgba(180, 200, 230, 0.9)",
+  },
+  "war-axe": {
+    damage: 3,
+    knockback: 28,
+    range: 40,
+    width: 44,
+    cooldownMs: 560,
+    durationMs: 200,
+    maxDurability: 35,
+    name: "War Axe",
+    swingColor: "rgba(255, 80, 20, 0.9)",
+  },
+  dagger: {
+    damage: 1,
+    knockback: 10,
+    range: 36,
+    width: 28,
+    cooldownMs: 280,
+    durationMs: 120,
+    maxDurability: 50,
+    name: "Dagger",
+    swingColor: "rgba(210, 225, 255, 0.8)",
+  },
+};
+
+const MOB_COLORS: Record<MobType, { normal: string; hit: string }> = {
+  snake: { normal: "lime", hit: "#88ff88" },
+  slime: { normal: "#20b2aa", hit: "#66dddd" },
+  wraith: { normal: "#9932cc", hit: "#cc66ff" },
+  brute: { normal: "#ff8800", hit: "#ffaa44" },
+};
+
+const MOB_TYPE_LABELS: Record<MobType, string> = {
+  snake: "Snake",
+  slime: "Slime",
+  wraith: "Wraith",
+  brute: "Brute",
+};
+
 const PLAY_WIDTH = canvas.width;
-const PLAY_HEIGHT = canvas.height - HUD_HEIGHT;
+const PLAY_HEIGHT = canvas.height;
 
 const ROOM_NAME_PARTS = [
   "Chamber",
@@ -128,37 +288,27 @@ const coin = {
   size: 20,
 };
 
-const snake = {
-  segments: [] as { x: number; y: number }[],
-  size: 24,
-  speed: 2,
-};
-
-let snakeDeadUntil = 0;
-const SNAKE_RESPAWN_MS = 4000;
+const activeMobs: RuntimeMob[] = [];
+const MOB_RESPAWN_MS = 4000;
 
 let playerFacing: Direction = "east";
 
-const weapon = {
-  range: 44,
-  width: 38,
-  durationMs: 160,
-  cooldownMs: 480,
+let equippedWeapon: { id: WeaponId; durability: number } | null = null;
+
+const weaponSwing = {
   activeUntil: 0,
   lastAttackAt: 0,
+  lastDamagedSwing: 0,
 };
 
-const SWORD_PICKUP_SIZE = 40;
+const WEAPON_PICKUP_SIZE = 40;
 const STAIRS_TILE_SIZE = 52;
 const SWORD_START_POSITION = { x: 200, y: 115 };
-const SWORD_TUTORIAL_MS = 6000;
-const SWORD_MAX_DURABILITY = 25;
+const WEAPON_TUTORIAL_MS = 6000;
 const FLOOR_MESSAGE_MS = 2500;
 const DESCEND_BONUS = 15;
 
-let hasSword = false;
-let swordDurability = 0;
-let swordTutorialUntil = 0;
+let weaponTutorialUntil = 0;
 let floorMessageUntil = 0;
 let floorMessage = "";
 let stairsCooldownUntil = 0;
@@ -168,7 +318,13 @@ const DOOR_THICKNESS = 10;
 const DOOR_LENGTH = 60;
 const DOOR_HIT_DEPTH = 24;
 
+const POTION_PICKUP_SIZE = 26;
+const CHEST_SIZE = 36;
+const MAX_INVENTORY_SIZE = 6;
+
 let mapOpen = false;
+let inventoryOpen = false;
+const inventory: InventoryItem[] = [];
 
 let state: GameState = "menu";
 let score = 0;
@@ -176,7 +332,6 @@ let score = 0;
 const hp = {
   max: 100,
   current: 100,
-  damage: 34,
   invincibilityMs: 1000,
 };
 
@@ -196,6 +351,21 @@ window.addEventListener("keydown", (event) => {
   if (key === "m" && state === "playing") {
     event.preventDefault();
     toggleMap();
+  }
+
+  if (key === "i" && state === "playing") {
+    event.preventDefault();
+    toggleInventory();
+  }
+
+  if (key === "1" && state === "playing") {
+    event.preventDefault();
+    useHealthPotion();
+  }
+
+  if (key === "2" && state === "playing") {
+    event.preventDefault();
+    useStrongPotion();
   }
 });
 
@@ -222,6 +392,25 @@ function randomPosition(rng: () => number, margin = 60) {
   };
 }
 
+function findClearPosition(
+  rng: () => number,
+  size: number,
+  occupied: { x: number; y: number; w: number; h: number }[],
+  margin = 72,
+) {
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const pos = randomPosition(rng, margin);
+    const candidate = { x: pos.x, y: pos.y, w: size, h: size };
+    const overlaps = occupied.some((box) => boxesOverlap(candidate, box, 16));
+
+    if (!overlaps) {
+      return pos;
+    }
+  }
+
+  return randomPosition(rng, margin);
+}
+
 function backgroundForDepth(depth: number, variant: number) {
   const hue = (205 + depth * 14 + variant * 27) % 360;
   const lightness = Math.max(7, 20 - depth * 1.5);
@@ -235,17 +424,84 @@ function stairsTilePosition() {
   };
 }
 
-function generateSnake(depth: number, rng: () => number): SnakeConfig {
-  const segmentCount = Math.min(8, 2 + depth + Math.floor(rng() * 3));
-  const speed = 1.75 + depth * 0.28 + rng() * 0.4;
-  const spawn = randomPosition(rng, 100);
-  const segments: { x: number; y: number }[] = [];
+function contactDamageForDepth(depth: number) {
+  return 12 + Math.floor(depth * 3);
+}
 
-  for (let i = 0; i < segmentCount; i++) {
-    segments.push({ x: spawn.x - i * 28, y: spawn.y });
+function generateMob(type: MobType, depth: number, rng: () => number): MobConfig {
+  const baseContact = contactDamageForDepth(depth);
+  const spawn = randomPosition(rng, 100);
+
+  switch (type) {
+    case "snake": {
+      const segmentCount = Math.min(9, 2 + depth + Math.floor(rng() * 2));
+      const speed = 1.2 + depth * 0.18 + rng() * 0.3;
+      const maxHp = Math.floor(2 + depth * 2 + rng() * 2);
+      const segments: { x: number; y: number }[] = [];
+
+      for (let i = 0; i < segmentCount; i++) {
+        segments.push({ x: spawn.x - i * 28, y: spawn.y });
+      }
+
+      return { type, segments, size: 24, speed, maxHp, contactDamage: baseContact };
+    }
+    case "slime":
+      return {
+        type,
+        segments: [{ ...spawn }],
+        size: 22,
+        speed: 0.9 + depth * 0.12 + rng() * 0.15,
+        maxHp: Math.floor(1 + depth * 1.2 + rng()),
+        contactDamage: Math.floor(baseContact * 0.85),
+      };
+    case "wraith":
+      return {
+        type,
+        segments: [{ ...spawn }],
+        size: 20,
+        speed: 2.0 + depth * 0.22 + rng() * 0.25,
+        maxHp: Math.floor(1 + depth * 1.0 + rng()),
+        contactDamage: Math.floor(baseContact * 0.9),
+      };
+    case "brute":
+      return {
+        type,
+        segments: [{ ...spawn }],
+        size: 32,
+        speed: 0.85 + depth * 0.1 + rng() * 0.12,
+        maxHp: Math.floor(4 + depth * 3.5 + rng() * 2),
+        contactDamage: Math.floor(baseContact * 1.15),
+      };
+  }
+}
+
+const ALL_MOB_TYPES: MobType[] = ["snake", "slime", "wraith", "brute"];
+
+function generateEnemies(depth: number, rng: () => number): MobConfig[] {
+  const count = depth === 1 ? 1 : 1 + Math.floor(rng() * 2);
+  const enemies: MobConfig[] = [];
+
+  for (let i = 0; i < count; i++) {
+    const type = ALL_MOB_TYPES[Math.floor(rng() * ALL_MOB_TYPES.length)];
+    enemies.push(generateMob(type, depth, rng));
   }
 
-  return { segments, size: 24, speed };
+  return enemies;
+}
+
+function generateChestLoot(depth: number, rng: () => number): ChestLoot {
+  const roll = rng();
+
+  if (roll < 0.35) {
+    const weaponIds: WeaponId[] = ["iron-sword", "war-axe", "dagger"];
+    return { kind: "weapon", weaponId: weaponIds[Math.floor(rng() * weaponIds.length)] };
+  }
+
+  if (roll < 0.7) {
+    return { kind: "health-potion", healAmount: 30 + Math.floor(depth * 10 + rng() * 10) };
+  }
+
+  return { kind: "strong-potion", healAmount: 55 + Math.floor(depth * 14 + rng() * 12) };
 }
 
 function generateFloor(depth: number, seed: number): Floor {
@@ -299,6 +555,17 @@ function generateFloor(depth: number, seed: number): Floor {
     }
 
     const namePart = ROOM_NAME_PARTS[Math.floor(rng() * ROOM_NAME_PARTS.length)];
+    const occupied: { x: number; y: number; w: number; h: number }[] = [];
+    const centerStairs = {
+      x: PLAY_WIDTH / 2 - STAIRS_TILE_SIZE / 2,
+      y: PLAY_HEIGHT / 2 - STAIRS_TILE_SIZE / 2,
+      w: STAIRS_TILE_SIZE,
+      h: STAIRS_TILE_SIZE,
+    };
+    occupied.push(centerStairs);
+
+    const coinPos = findClearPosition(rng, coin.size, occupied, 64);
+    occupied.push({ x: coinPos.x, y: coinPos.y, w: coin.size, h: coin.size });
 
     rooms[cell.id] = {
       id: cell.id,
@@ -307,9 +574,31 @@ function generateFloor(depth: number, seed: number): Floor {
       gridX: cell.gx,
       gridY: cell.gy,
       exits,
-      coin: randomPosition(rng),
-      snake: generateSnake(depth, rng),
+      coin: coinPos,
+      enemies: generateEnemies(depth, rng),
     };
+
+    if (rng() < 0.42) {
+      const potionPos = findClearPosition(rng, POTION_PICKUP_SIZE, occupied, 72);
+      occupied.push({
+        x: potionPos.x,
+        y: potionPos.y,
+        w: POTION_PICKUP_SIZE,
+        h: POTION_PICKUP_SIZE,
+      });
+      rooms[cell.id].potionPickup = potionPos;
+      rooms[cell.id].potionHeal = 30 + Math.floor(depth * 12 + rng() * 10);
+    }
+
+    if (rng() < 0.3) {
+      const chestPos = findClearPosition(rng, CHEST_SIZE, occupied, 72);
+      rooms[cell.id].chest = {
+        x: chestPos.x,
+        y: chestPos.y,
+        opened: false,
+        loot: generateChestLoot(depth, rng),
+      };
+    }
   }
 
   rooms[farthestRoomId].stairsDownTile = stairsTilePosition();
@@ -319,15 +608,23 @@ function generateFloor(depth: number, seed: number): Floor {
   }
 
   if (depth === 1) {
-    rooms[startId].swordPickup = { ...SWORD_START_POSITION };
-    rooms[startId].snake = {
-      segments: [
-        { x: 560, y: 310 },
-        { x: 590, y: 310 },
-      ],
-      size: 24,
-      speed: 1.6,
-    };
+    rooms[startId].weaponPickup = { ...SWORD_START_POSITION, weaponId: "rusty-sword" };
+    rooms[startId].potionPickup = { x: 280, y: 200 };
+    rooms[startId].potionHeal = 45;
+    rooms[startId].potionCollected = false;
+    rooms[startId].enemies = [
+      {
+        type: "snake",
+        segments: [
+          { x: 560, y: 310 },
+          { x: 590, y: 310 },
+        ],
+        size: 24,
+        speed: 1.2,
+        maxHp: 3,
+        contactDamage: contactDamageForDepth(1),
+      },
+    ];
   }
 
   return {
@@ -353,13 +650,29 @@ function getCurrentRoom(): Room {
 }
 
 function toggleMap() {
-  mapOpen = !mapOpen;
-  mapBtn.textContent = mapOpen ? "Close" : "Map";
+  setMapOpen(!mapOpen);
 }
 
 function setMapOpen(open: boolean) {
   mapOpen = open;
   mapBtn.textContent = mapOpen ? "Close" : "Map";
+
+  if (open) {
+    setInventoryOpen(false);
+  }
+}
+
+function setInventoryOpen(open: boolean) {
+  inventoryOpen = open;
+  invBtn.textContent = inventoryOpen ? "Close" : "Inv";
+
+  if (open) {
+    setMapOpen(false);
+  }
+}
+
+function toggleInventory() {
+  setInventoryOpen(!inventoryOpen);
 }
 
 function showFloorMessage(message: string) {
@@ -367,15 +680,77 @@ function showFloorMessage(message: string) {
   floorMessageUntil = performance.now() + FLOOR_MESSAGE_MS;
 }
 
+function isMobAlive(mob: RuntimeMob) {
+  return mob.segments.length > 0;
+}
+
 function applyRoomState(room: Room) {
   coin.x = room.coin.x;
   coin.y = room.coin.y;
-  snake.segments = room.snake.segments.map((segment) => ({ ...segment }));
-  snake.size = room.snake.size;
-  snake.speed = room.snake.speed;
-  snakeDeadUntil = 0;
-  weapon.activeUntil = 0;
-  weapon.lastAttackAt = 0;
+  activeMobs.length = 0;
+  weaponSwing.activeUntil = 0;
+  weaponSwing.lastAttackAt = 0;
+
+  const now = performance.now();
+
+  for (let i = 0; i < room.enemies.length; i++) {
+    const config = room.enemies[i];
+
+    if (config.respawnAt && now < config.respawnAt) {
+      activeMobs.push({
+        configIndex: i,
+        type: config.type,
+        segments: [],
+        size: config.size,
+        speed: config.speed,
+        hp: 0,
+        maxHp: config.maxHp,
+        contactDamage: config.contactDamage,
+        deadUntil: config.respawnAt,
+        hitFlashUntil: 0,
+      });
+      continue;
+    }
+
+    activeMobs.push({
+      configIndex: i,
+      type: config.type,
+      segments: config.segments.map((segment) => ({ ...segment })),
+      size: config.size,
+      speed: config.speed,
+      hp: config.currentHp ?? config.maxHp,
+      maxHp: config.maxHp,
+      contactDamage: config.contactDamage,
+      deadUntil: 0,
+      hitFlashUntil: 0,
+    });
+    config.respawnAt = undefined;
+  }
+}
+
+function saveMobsToRoom() {
+  if (!currentRoomId) {
+    return;
+  }
+
+  const room = getCurrentRoom();
+  const now = performance.now();
+
+  for (const mob of activeMobs) {
+    const config = room.enemies[mob.configIndex];
+
+    if (isMobAlive(mob)) {
+      config.currentHp = mob.hp;
+      config.segments = mob.segments.map((segment) => ({ ...segment }));
+      config.respawnAt = undefined;
+    } else if (mob.deadUntil > now) {
+      config.currentHp = 0;
+      config.respawnAt = mob.deadUntil;
+    } else {
+      config.currentHp = config.maxHp;
+      config.respawnAt = undefined;
+    }
+  }
 }
 
 function roomKey(depth: number, roomId: string) {
@@ -390,17 +765,34 @@ function isRoomVisited(depth: number, roomId: string) {
   return visitedRooms.has(roomKey(depth, roomId));
 }
 
-function hasUsableSword() {
-  return hasSword && swordDurability > 0;
+function hasUsableWeapon() {
+  return equippedWeapon !== null && equippedWeapon.durability > 0;
 }
 
-function consumeSwordDurability(amount: number) {
-  swordDurability = Math.max(0, swordDurability - amount);
+function getEquippedWeaponDef(): WeaponDef {
+  return WEAPONS[equippedWeapon!.id];
+}
 
-  if (swordDurability <= 0) {
-    hasSword = false;
-    showFloorMessage("Your sword broke!");
+function consumeWeaponDurability(amount: number) {
+  if (!equippedWeapon) {
+    return;
   }
+
+  equippedWeapon.durability = Math.max(0, equippedWeapon.durability - amount);
+
+  if (equippedWeapon.durability <= 0) {
+    const name = WEAPONS[equippedWeapon.id].name;
+    equippedWeapon = null;
+    showFloorMessage(`Your ${name} broke!`);
+  }
+}
+
+function equipWeapon(weaponId: WeaponId) {
+  equippedWeapon = {
+    id: weaponId,
+    durability: WEAPONS[weaponId].maxDurability,
+  };
+  weaponTutorialUntil = performance.now() + WEAPON_TUTORIAL_MS;
 }
 
 function loadRoom(roomId: string) {
@@ -437,6 +829,7 @@ function spawnFromDirection(direction: Direction) {
 }
 
 function changeRoom(roomId: string, enteredFrom: Direction) {
+  saveMobsToRoom();
   loadRoom(roomId);
   spawnFromDirection(enteredFrom);
 }
@@ -449,6 +842,7 @@ function spawnAtTile(tile: { x: number; y: number }, below: boolean) {
 }
 
 function descendFloor() {
+  saveMobsToRoom();
   currentDepth += 1;
   deepestDepth = Math.max(deepestDepth, currentDepth);
   ensureFloor(currentDepth);
@@ -473,6 +867,7 @@ function ascendFloor() {
     return;
   }
 
+  saveMobsToRoom();
   currentDepth -= 1;
   loadRoom(getCurrentFloor().stairsDownRoomId);
 
@@ -492,14 +887,15 @@ function resetGame() {
   score = 0;
   hp.current = hp.max;
   invincibleUntil = 0;
-  hasSword = false;
-  swordDurability = 0;
-  swordTutorialUntil = 0;
+  equippedWeapon = { id: "rusty-sword", durability: WEAPONS["rusty-sword"].maxDurability };
+  weaponTutorialUntil = performance.now() + WEAPON_TUTORIAL_MS;
   floorMessageUntil = 0;
   floorMessage = "";
   stairsCooldownUntil = 0;
   visitedRooms.clear();
+  inventory.length = 0;
   setMapOpen(false);
+  setInventoryOpen(false);
   playerFacing = "east";
   player.x = 100;
   player.y = 100;
@@ -512,18 +908,21 @@ function resetGame() {
   keys.clear();
 }
 
-function isSnakeAlive() {
-  return snake.segments.length > 0;
-}
-
 function boxesOverlap(
   a: { x: number; y: number; w: number; h: number },
   b: { x: number; y: number; w: number; h: number },
+  padding = 0,
 ) {
-  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  return (
+    a.x < b.x + b.w + padding &&
+    a.x + a.w + padding > b.x &&
+    a.y < b.y + b.h + padding &&
+    a.y + a.h + padding > b.y
+  );
 }
 
 function getSwingHitbox() {
+  const def = getEquippedWeaponDef();
   const centerX = player.x + player.size / 2;
   const centerY = player.y + player.size / 2;
 
@@ -531,115 +930,204 @@ function getSwingHitbox() {
     case "east":
       return {
         x: player.x + player.size,
-        y: centerY - weapon.width / 2,
-        w: weapon.range,
-        h: weapon.width,
+        y: centerY - def.width / 2,
+        w: def.range,
+        h: def.width,
       };
     case "west":
       return {
-        x: player.x - weapon.range,
-        y: centerY - weapon.width / 2,
-        w: weapon.range,
-        h: weapon.width,
+        x: player.x - def.range,
+        y: centerY - def.width / 2,
+        w: def.range,
+        h: def.width,
       };
     case "north":
       return {
-        x: centerX - weapon.width / 2,
-        y: player.y - weapon.range,
-        w: weapon.width,
-        h: weapon.range,
+        x: centerX - def.width / 2,
+        y: player.y - def.range,
+        w: def.width,
+        h: def.range,
       };
     case "south":
       return {
-        x: centerX - weapon.width / 2,
+        x: centerX - def.width / 2,
         y: player.y + player.size,
-        w: weapon.width,
-        h: weapon.range,
+        w: def.width,
+        h: def.range,
       };
   }
 }
 
-function slaySnake() {
-  snake.segments = [];
-  snakeDeadUntil = performance.now() + SNAKE_RESPAWN_MS;
+function getSwingArcAngles(): { start: number; end: number } {
+  const sweep = Math.PI * 0.55;
+
+  switch (playerFacing) {
+    case "east":
+      return { start: -Math.PI / 2 - sweep / 2, end: -Math.PI / 2 + sweep / 2 };
+    case "west":
+      return { start: Math.PI / 2 - sweep / 2, end: Math.PI / 2 + sweep / 2 };
+    case "north":
+      return { start: Math.PI - sweep / 2, end: Math.PI + sweep / 2 };
+    case "south":
+      return { start: -sweep / 2, end: sweep / 2 };
+  }
+}
+
+function slayMob(mob: RuntimeMob) {
+  mob.segments = [];
+  mob.hp = 0;
+  const room = getCurrentRoom();
+  const config = room.enemies[mob.configIndex];
+  config.currentHp = 0;
+  config.respawnAt = performance.now() + MOB_RESPAWN_MS;
+  mob.deadUntil = config.respawnAt;
   score += 3;
 }
 
-function tryAttack() {
-  if (!hasUsableSword()) {
+function damageMob(mob: RuntimeMob, amount: number) {
+  if (!isMobAlive(mob)) {
     return;
   }
 
+  mob.hp = Math.max(0, mob.hp - amount);
+  mob.hitFlashUntil = performance.now() + 180;
+  getCurrentRoom().enemies[mob.configIndex].currentHp = mob.hp;
+
+  if (mob.hp <= 0) {
+    slayMob(mob);
+  }
+}
+
+function applyKnockback(mob: RuntimeMob, knockback: number) {
+  let dx = 0;
+  let dy = 0;
+
+  switch (playerFacing) {
+    case "east":
+      dx = knockback;
+      break;
+    case "west":
+      dx = -knockback;
+      break;
+    case "north":
+      dy = -knockback;
+      break;
+    case "south":
+      dy = knockback;
+      break;
+  }
+
+  for (const segment of mob.segments) {
+    segment.x = Math.max(0, Math.min(PLAY_WIDTH - mob.size, segment.x + dx));
+    segment.y = Math.max(0, Math.min(PLAY_HEIGHT - mob.size, segment.y + dy));
+  }
+}
+
+function tryAttack() {
+  if (!hasUsableWeapon()) {
+    return;
+  }
+
+  const def = getEquippedWeaponDef();
   const now = performance.now();
 
-  if (now < weapon.lastAttackAt + weapon.cooldownMs || !isSnakeAlive()) {
+  if (now < weaponSwing.lastAttackAt + def.cooldownMs) {
     return;
   }
 
-  weapon.lastAttackAt = now;
-  weapon.activeUntil = now + weapon.durationMs;
-  consumeSwordDurability(1);
+  weaponSwing.lastAttackAt = now;
+  weaponSwing.activeUntil = now + def.durationMs;
+  consumeWeaponDurability(1);
   checkWeaponHits();
 }
 
-function getSwordPickupPosition() {
-  return getCurrentRoom().swordPickup;
+function getWeaponPickupPosition() {
+  return getCurrentRoom().weaponPickup;
 }
 
-function tryPickupSword() {
-  if (hasSword) {
-    return;
-  }
-
-  const pickup = getSwordPickupPosition();
+function tryPickupWeapon() {
+  const pickup = getWeaponPickupPosition();
 
   if (!pickup) {
     return;
   }
 
   if (
-    boxesOverlap(
+    !boxesOverlap(
       { x: player.x, y: player.y, w: player.size, h: player.size },
-      { x: pickup.x, y: pickup.y, w: SWORD_PICKUP_SIZE, h: SWORD_PICKUP_SIZE },
+      { x: pickup.x, y: pickup.y, w: WEAPON_PICKUP_SIZE, h: WEAPON_PICKUP_SIZE },
     )
   ) {
-    hasSword = true;
-    swordDurability = SWORD_MAX_DURABILITY;
-    swordTutorialUntil = performance.now() + SWORD_TUTORIAL_MS;
-  }
-}
-
-function checkWeaponHits() {
-  if (!isSnakeAlive()) {
     return;
   }
 
-  const hitbox = getSwingHitbox();
+  if (!equippedWeapon) {
+    equipWeapon(pickup.weaponId);
+    showFloorMessage(`Equipped ${WEAPONS[pickup.weaponId].name}!`);
+  } else {
+    addToInventory({ type: "weapon", weaponId: pickup.weaponId });
+    showFloorMessage(`${WEAPONS[pickup.weaponId].name} added to inventory`);
+  }
 
-  for (const segment of snake.segments) {
-    if (
-      boxesOverlap(hitbox, {
-        x: segment.x,
-        y: segment.y,
-        w: snake.size,
-        h: snake.size,
-      })
-    ) {
-      slaySnake();
-      return;
+  delete getCurrentRoom().weaponPickup;
+}
+
+function checkWeaponHits() {
+  if (weaponSwing.lastAttackAt === weaponSwing.lastDamagedSwing) {
+    return;
+  }
+
+  const def = getEquippedWeaponDef();
+  const hitbox = getSwingHitbox();
+  let hit = false;
+
+  for (const mob of activeMobs) {
+    if (!isMobAlive(mob)) {
+      continue;
+    }
+
+    for (const segment of mob.segments) {
+      if (
+        boxesOverlap(hitbox, {
+          x: segment.x,
+          y: segment.y,
+          w: mob.size,
+          h: mob.size,
+        })
+      ) {
+        weaponSwing.lastDamagedSwing = weaponSwing.lastAttackAt;
+        damageMob(mob, def.damage);
+        applyKnockback(mob, def.knockback);
+        hit = true;
+        break;
+      }
+    }
+
+    if (hit) {
+      break;
     }
   }
 }
 
-function updateSnakeRespawn() {
-  if (isSnakeAlive() || performance.now() < snakeDeadUntil) {
-    return;
-  }
+function updateMobRespawns() {
+  const now = performance.now();
 
-  const room = getCurrentRoom();
-  snake.segments = room.snake.segments.map((segment) => ({ ...segment }));
-  snake.size = room.snake.size;
-  snake.speed = room.snake.speed;
+  for (const mob of activeMobs) {
+    if (isMobAlive(mob) || now < mob.deadUntil) {
+      continue;
+    }
+
+    const config = getCurrentRoom().enemies[mob.configIndex];
+    mob.segments = config.segments.map((segment) => ({ ...segment }));
+    mob.size = config.size;
+    mob.speed = config.speed;
+    mob.maxHp = config.maxHp;
+    mob.hp = config.maxHp;
+    mob.contactDamage = config.contactDamage;
+    mob.deadUntil = 0;
+    config.currentHp = config.maxHp;
+    config.respawnAt = undefined;
+  }
 }
 
 function updateFacing() {
@@ -658,6 +1146,7 @@ function showMenu() {
   state = "menu";
   keys.clear();
   setMapOpen(false);
+  setInventoryOpen(false);
 
   gameOverEl.classList.add("hidden");
   gameWrap.classList.add("hidden");
@@ -678,6 +1167,7 @@ function endGame() {
   state = "gameover";
   keys.clear();
   setMapOpen(false);
+  setInventoryOpen(false);
   finalScoreEl.textContent = String(score);
   finalDepthEl.textContent = String(deepestDepth);
 
@@ -828,12 +1318,12 @@ function isPlayerInvincible() {
   return performance.now() < invincibleUntil;
 }
 
-function takeDamage() {
+function takeDamage(amount: number) {
   if (isPlayerInvincible()) {
     return;
   }
 
-  hp.current = Math.max(0, hp.current - hp.damage);
+  hp.current = Math.max(0, hp.current - amount);
   invincibleUntil = performance.now() + hp.invincibilityMs;
 
   if (hp.current <= 0) {
@@ -841,23 +1331,25 @@ function takeDamage() {
   }
 }
 
-function isPlayerHitBySnake() {
-  if (!isSnakeAlive()) {
-    return false;
-  }
+function isPlayerHitByMobs() {
+  for (const mob of activeMobs) {
+    if (!isMobAlive(mob)) {
+      continue;
+    }
 
-  for (const segment of snake.segments) {
-    if (
-      player.x < segment.x + snake.size &&
-      player.x + player.size > segment.x &&
-      player.y < segment.y + snake.size &&
-      player.y + player.size > segment.y
-    ) {
-      return true;
+    for (const segment of mob.segments) {
+      if (
+        player.x < segment.x + mob.size &&
+        player.x + player.size > segment.x &&
+        player.y < segment.y + mob.size &&
+        player.y + player.size > segment.y
+      ) {
+        return mob.contactDamage;
+      }
     }
   }
 
-  return false;
+  return 0;
 }
 
 function moveCoin() {
@@ -865,57 +1357,176 @@ function moveCoin() {
   coin.y = Math.random() * (PLAY_HEIGHT - coin.size);
 }
 
-function moveSnake() {
-  if (!isSnakeAlive()) {
+function moveMob(mob: RuntimeMob) {
+  if (!isMobAlive(mob)) {
     return;
   }
 
-  const head = snake.segments[0];
-
+  const head = mob.segments[0];
   const dx = player.x - head.x;
   const dy = player.y - head.y;
   const distance = Math.sqrt(dx * dx + dy * dy);
 
   if (distance > 0) {
-    head.x += (dx / distance) * snake.speed;
-    head.y += (dy / distance) * snake.speed;
+    head.x += (dx / distance) * mob.speed;
+    head.y += (dy / distance) * mob.speed;
   }
 
-  for (let i = 1; i < snake.segments.length; i++) {
-    const previous = snake.segments[i - 1];
-    const current = snake.segments[i];
+  head.x = Math.max(0, Math.min(PLAY_WIDTH - mob.size, head.x));
+  head.y = Math.max(0, Math.min(PLAY_HEIGHT - mob.size, head.y));
 
-    const followDx = previous.x - current.x;
-    const followDy = previous.y - current.y;
-    const followDistance = Math.sqrt(followDx * followDx + followDy * followDy);
+  if (mob.type === "snake") {
+    for (let i = 1; i < mob.segments.length; i++) {
+      const previous = mob.segments[i - 1];
+      const current = mob.segments[i];
+      const followDx = previous.x - current.x;
+      const followDy = previous.y - current.y;
+      const followDistance = Math.sqrt(followDx * followDx + followDy * followDy);
+      const spacing = mob.size + 4;
 
-    const spacing = snake.size + 4;
-
-    if (followDistance > spacing) {
-      current.x += (followDx / followDistance) * snake.speed;
-      current.y += (followDy / followDistance) * snake.speed;
+      if (followDistance > spacing) {
+        current.x += (followDx / followDistance) * mob.speed;
+        current.y += (followDy / followDistance) * mob.speed;
+      }
     }
   }
 }
 
+function moveMobs() {
+  for (const mob of activeMobs) {
+    moveMob(mob);
+  }
+}
+
 function updateWeapon() {
-  if (performance.now() < weapon.activeUntil) {
+  if (performance.now() < weaponSwing.activeUntil) {
     checkWeaponHits();
   }
 }
 
+function addToInventory(item: InventoryItem) {
+  if (inventory.length >= MAX_INVENTORY_SIZE) {
+    showFloorMessage("Inventory full!");
+    return false;
+  }
+
+  inventory.push(item);
+  return true;
+}
+
+function usePotion(type: "health-potion" | "strong-potion") {
+  const potionIndex = inventory.findIndex((item) => item.type === type);
+
+  if (potionIndex === -1) {
+    showFloorMessage(type === "health-potion" ? "No health potions." : "No strong potions.");
+    return;
+  }
+
+  if (hp.current >= hp.max) {
+    showFloorMessage("Already at full health!");
+    return;
+  }
+
+  const potion = inventory[potionIndex];
+  const healed = Math.min(potion.healAmount ?? 0, hp.max - hp.current);
+  hp.current += healed;
+  inventory.splice(potionIndex, 1);
+  showFloorMessage(`Restored ${healed} HP!`);
+}
+
+function useHealthPotion() {
+  usePotion("health-potion");
+}
+
+function useStrongPotion() {
+  usePotion("strong-potion");
+}
+
+function tryPickupPotion() {
+  const room = getCurrentRoom();
+
+  if (!room.potionPickup || room.potionCollected) {
+    return;
+  }
+
+  if (
+    !boxesOverlap(
+      { x: player.x, y: player.y, w: player.size, h: player.size },
+      {
+        x: room.potionPickup.x,
+        y: room.potionPickup.y,
+        w: POTION_PICKUP_SIZE,
+        h: POTION_PICKUP_SIZE,
+      },
+    )
+  ) {
+    return;
+  }
+
+  const healAmount = room.potionHeal ?? 40;
+
+  if (
+    addToInventory({
+      type: "health-potion",
+      healAmount,
+    })
+  ) {
+    room.potionCollected = true;
+    showFloorMessage(`Potion collected (+${healAmount} HP)`);
+  }
+}
+
+function collectChestLoot(loot: ChestLoot) {
+  if (loot.kind === "weapon") {
+    if (!equippedWeapon) {
+      equipWeapon(loot.weaponId);
+      showFloorMessage(`Equipped ${WEAPONS[loot.weaponId].name}!`);
+    } else if (addToInventory({ type: "weapon", weaponId: loot.weaponId })) {
+      showFloorMessage(`${WEAPONS[loot.weaponId].name} added to inventory`);
+    }
+    return;
+  }
+
+  if (addToInventory({ type: loot.kind, healAmount: loot.healAmount })) {
+    const label = loot.kind === "strong-potion" ? "Strong potion" : "Health potion";
+    showFloorMessage(`${label} collected (+${loot.healAmount} HP)`);
+  }
+}
+
+function tryOpenChest() {
+  const room = getCurrentRoom();
+
+  if (!room.chest || room.chest.opened) {
+    return;
+  }
+
+  if (
+    !boxesOverlap(
+      { x: player.x, y: player.y, w: player.size, h: player.size },
+      { x: room.chest.x, y: room.chest.y, w: CHEST_SIZE, h: CHEST_SIZE },
+    )
+  ) {
+    return;
+  }
+
+  room.chest.opened = true;
+  collectChestLoot(room.chest.loot);
+}
+
 function update() {
-  if (mapOpen) {
+  if (mapOpen || inventoryOpen) {
     return;
   }
 
   movePlayer();
-  updateSnakeRespawn();
-  moveSnake();
+  updateMobRespawns();
+  moveMobs();
   updateWeapon();
 
-  if (isPlayerHitBySnake()) {
-    takeDamage();
+  const contactDamage = isPlayerHitByMobs();
+
+  if (contactDamage > 0) {
+    takeDamage(contactDamage);
   }
 
   if (isCoinColliding()) {
@@ -923,102 +1534,37 @@ function update() {
     moveCoin();
   }
 
-  tryPickupSword();
+  tryPickupWeapon();
+  tryPickupPotion();
+  tryOpenChest();
 }
 
-function drawHpBar(x: number, y: number, width: number, height: number) {
-  const fillRatio = hp.current / hp.max;
-
-  ctx.fillStyle = "#333";
-  ctx.fillRect(x, y, width, height);
-
-  if (fillRatio > 0.5) {
-    ctx.fillStyle = "#44ff44";
-  } else if (fillRatio > 0.25) {
-    ctx.fillStyle = "#ffaa00";
-  } else {
-    ctx.fillStyle = "#ff4444";
-  }
-
-  ctx.fillRect(x, y, width * fillRatio, height);
-
-  ctx.strokeStyle = "white";
-  ctx.lineWidth = 2;
-  ctx.strokeRect(x, y, width, height);
-}
-
-function drawHud() {
+function updateHtmlHud() {
   const room = getCurrentRoom();
 
-  ctx.fillStyle = "#141414";
-  ctx.fillRect(0, 0, canvas.width, HUD_HEIGHT);
+  hudScoreEl.textContent = String(score);
+  hudDepthEl.textContent = String(currentDepth);
+  hudRoomEl.textContent = room.name;
+  hudItemsEl.textContent = `${inventory.length}/${MAX_INVENTORY_SIZE} items`;
 
-  ctx.strokeStyle = "#444";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(0, HUD_HEIGHT);
-  ctx.lineTo(canvas.width, HUD_HEIGHT);
-  ctx.stroke();
+  const hpRatio = hp.current / hp.max;
+  hudHpFillEl.style.width = `${Math.max(0, Math.min(1, hpRatio)) * 100}%`;
+  hudHpTextEl.textContent = String(hp.current);
 
-  ctx.fillStyle = "white";
-  ctx.font = "20px Arial";
-  ctx.textAlign = "left";
-  ctx.fillText(`Score: ${score}`, 20, 30);
-
-  ctx.textAlign = "right";
-  ctx.fillStyle = "#ccc";
-  ctx.font = "18px Arial";
-  ctx.fillText(`Depth ${currentDepth}`, canvas.width - 20, 30);
-
-  ctx.textAlign = "left";
-  ctx.fillStyle = "#999";
-  ctx.font = "14px Arial";
-  ctx.fillText(room.name, 20, 48);
-
-  ctx.fillStyle = "white";
-  ctx.font = "16px Arial";
-  ctx.fillText("HP", 280, 58);
-  drawHpBar(308, 44, 140, 18);
-
-  ctx.font = "14px Arial";
-  ctx.textAlign = "right";
-
-  if (hasUsableSword()) {
-    const cooldownReady = performance.now() >= weapon.lastAttackAt + weapon.cooldownMs;
-    ctx.fillStyle = cooldownReady ? "#ff8844" : "#555";
-    ctx.fillText(
-      cooldownReady ? `Sword ${swordDurability}/${SWORD_MAX_DURABILITY}` : "Sword cooling...",
-      canvas.width - 20,
-      58,
-    );
-    drawDurabilityBar(canvas.width - 148, 62, 128, 8);
+  if (hasUsableWeapon()) {
+    const def = getEquippedWeaponDef();
+    const cooldownReady = performance.now() >= weaponSwing.lastAttackAt + def.cooldownMs;
+    hudWeaponNameEl.textContent = cooldownReady
+      ? `${def.name} (${equippedWeapon!.durability})`
+      : "Cooling down…";
+    hudDurFillEl.style.width = `${(equippedWeapon!.durability / def.maxDurability) * 100}%`;
+    hudWeaponNameEl.classList.toggle("hud-weapon-ready", cooldownReady);
+    hudWeaponNameEl.classList.toggle("hud-weapon-cooldown", !cooldownReady);
   } else {
-    ctx.fillStyle = "#666";
-    ctx.fillText("No weapon equipped", canvas.width - 20, 58);
+    hudWeaponNameEl.textContent = "No weapon";
+    hudDurFillEl.style.width = "0%";
+    hudWeaponNameEl.classList.remove("hud-weapon-ready", "hud-weapon-cooldown");
   }
-
-  ctx.textAlign = "left";
-}
-
-function drawDurabilityBar(x: number, y: number, width: number, height: number) {
-  const fillRatio = swordDurability / SWORD_MAX_DURABILITY;
-
-  ctx.fillStyle = "#333";
-  ctx.fillRect(x, y, width, height);
-
-  if (fillRatio > 0.5) {
-    ctx.fillStyle = "#ff8844";
-  } else if (fillRatio > 0.25) {
-    ctx.fillStyle = "#ffaa00";
-  } else {
-    ctx.fillStyle = "#ff4444";
-  }
-
-  ctx.fillRect(x, y, width * fillRatio, height);
-
-  ctx.strokeStyle = "#888";
-  ctx.lineWidth = 1;
-  ctx.strokeRect(x, y, width, height);
 }
 
 function getRoomMapCenter(
@@ -1063,10 +1609,10 @@ function drawMapOverlay() {
   const mapWidth = gridWidth * cellSize;
   const mapHeight = gridHeight * cellSize;
   const originX = (PLAY_WIDTH - mapWidth) / 2;
-  const originY = HUD_HEIGHT + (PLAY_HEIGHT - mapHeight) / 2 - 24;
+  const originY = (PLAY_HEIGHT - mapHeight) / 2 - 24;
 
   ctx.fillStyle = "rgba(0, 0, 0, 0.82)";
-  ctx.fillRect(0, HUD_HEIGHT, PLAY_WIDTH, PLAY_HEIGHT);
+  ctx.fillRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
 
   ctx.fillStyle = "#1a1a1a";
   ctx.fillRect(originX - 20, originY - 52, mapWidth + 40, mapHeight + 88);
@@ -1184,149 +1730,315 @@ function drawMapOverlay() {
 
 function drawDoors(room: Room) {
   const centerX = PLAY_WIDTH / 2 - DOOR_LENGTH / 2;
-  const centerY = HUD_HEIGHT + PLAY_HEIGHT / 2 - DOOR_LENGTH / 2;
-
-  ctx.fillStyle = "rgba(255, 215, 0, 0.45)";
+  const centerY = PLAY_HEIGHT / 2 - DOOR_LENGTH / 2;
+  const doorW = DOOR_LENGTH;
+  const doorH = DOOR_THICKNESS + 4;
 
   if (room.exits.north) {
-    ctx.fillRect(centerX, HUD_HEIGHT, DOOR_LENGTH, DOOR_THICKNESS);
+    drawSprite(ctx, SPRITES.door, centerX, 0, doorW, doorH);
   }
 
   if (room.exits.south) {
-    ctx.fillRect(
-      centerX,
-      HUD_HEIGHT + PLAY_HEIGHT - DOOR_THICKNESS,
-      DOOR_LENGTH,
-      DOOR_THICKNESS,
-    );
+    drawSprite(ctx, SPRITES.door, centerX, PLAY_HEIGHT - doorH, doorW, doorH);
   }
 
   if (room.exits.west) {
-    ctx.fillRect(0, centerY, DOOR_THICKNESS, DOOR_LENGTH);
+    drawSprite(ctx, SPRITES.door, 0, centerY, doorH, doorW);
   }
 
   if (room.exits.east) {
-    ctx.fillRect(PLAY_WIDTH - DOOR_THICKNESS, centerY, DOOR_THICKNESS, DOOR_LENGTH);
+    drawSprite(ctx, SPRITES.door, PLAY_WIDTH - doorH, centerY, doorH, doorW);
   }
 }
 
 function drawStairsTiles(room: Room) {
   if (room.stairsDownTile) {
     const tile = room.stairsDownTile;
-    const screenY = tile.y + HUD_HEIGHT;
+    const pulse = Math.sin(performance.now() / 300) * 2;
 
-    ctx.fillStyle = "rgba(180, 90, 255, 0.55)";
-    ctx.fillRect(tile.x, screenY, STAIRS_TILE_SIZE, STAIRS_TILE_SIZE);
-    ctx.strokeStyle = "#e0b0ff";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(tile.x, screenY, STAIRS_TILE_SIZE, STAIRS_TILE_SIZE);
+    drawSprite(
+      ctx,
+      SPRITES.stairsDown,
+      tile.x,
+      tile.y + pulse,
+      STAIRS_TILE_SIZE,
+      STAIRS_TILE_SIZE,
+    );
 
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 14px Arial";
+    ctx.fillStyle = "#e8c8ff";
+    ctx.font = "bold 11px Arial";
     ctx.textAlign = "center";
-    ctx.fillText("▼", tile.x + STAIRS_TILE_SIZE / 2, screenY + STAIRS_TILE_SIZE / 2 + 5);
-    ctx.font = "11px Arial";
-    ctx.fillText("Down", tile.x + STAIRS_TILE_SIZE / 2, screenY + STAIRS_TILE_SIZE + 14);
+    ctx.fillText("▼ Down", tile.x + STAIRS_TILE_SIZE / 2, tile.y + STAIRS_TILE_SIZE + 12 + pulse);
     ctx.textAlign = "left";
   }
 
   if (room.stairsUpTile) {
     const tile = room.stairsUpTile;
-    const screenY = tile.y + HUD_HEIGHT;
+    const pulse = Math.sin(performance.now() / 300) * 2;
 
-    ctx.fillStyle = "rgba(120, 200, 255, 0.55)";
-    ctx.fillRect(tile.x, screenY, STAIRS_TILE_SIZE, STAIRS_TILE_SIZE);
-    ctx.strokeStyle = "#b0e0ff";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(tile.x, screenY, STAIRS_TILE_SIZE, STAIRS_TILE_SIZE);
+    drawSprite(
+      ctx,
+      SPRITES.stairsUp,
+      tile.x,
+      tile.y + pulse,
+      STAIRS_TILE_SIZE,
+      STAIRS_TILE_SIZE,
+    );
 
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 14px Arial";
+    ctx.fillStyle = "#b8e8ff";
+    ctx.font = "bold 11px Arial";
     ctx.textAlign = "center";
-    ctx.fillText("▲", tile.x + STAIRS_TILE_SIZE / 2, screenY + STAIRS_TILE_SIZE / 2 + 5);
-    ctx.font = "11px Arial";
-    ctx.fillText("Up", tile.x + STAIRS_TILE_SIZE / 2, screenY + STAIRS_TILE_SIZE + 14);
+    ctx.fillText("▲ Up", tile.x + STAIRS_TILE_SIZE / 2, tile.y + STAIRS_TILE_SIZE + 12 + pulse);
     ctx.textAlign = "left";
   }
 }
 
-function drawFacingIndicator(screenX: number, screenY: number) {
-  const nubSize = 10;
-  const offset = 2;
-
-  ctx.fillStyle = "#ffffff";
-
+function getPlayerSprite() {
   switch (playerFacing) {
-    case "east":
-      ctx.fillRect(
-        screenX + player.size + offset,
-        screenY + player.size / 2 - nubSize / 2,
-        nubSize,
-        nubSize,
-      );
-      break;
     case "west":
-      ctx.fillRect(
-        screenX - offset - nubSize,
-        screenY + player.size / 2 - nubSize / 2,
-        nubSize,
-        nubSize,
-      );
-      break;
+      return SPRITES.playerWest;
     case "north":
-      ctx.fillRect(
-        screenX + player.size / 2 - nubSize / 2,
-        screenY - offset - nubSize,
-        nubSize,
-        nubSize,
-      );
-      break;
+      return SPRITES.playerNorth;
     case "south":
-      ctx.fillRect(
-        screenX + player.size / 2 - nubSize / 2,
-        screenY + player.size + offset,
-        nubSize,
-        nubSize,
-      );
-      break;
+      return SPRITES.playerSouth;
+    default:
+      return SPRITES.playerEast;
   }
 }
 
-function drawSwordPickup() {
-  const pickup = getSwordPickupPosition();
+function getMobSprite(mob: RuntimeMob, segmentIndex: number) {
+  if (mob.type === "snake") {
+    return segmentIndex === 0 ? SPRITES.snakeHead : SPRITES.snakeBody;
+  }
 
-  if (!pickup || hasSword) {
+  if (mob.type === "slime") {
+    return SPRITES.slime;
+  }
+
+  if (mob.type === "wraith") {
+    return SPRITES.wraith;
+  }
+
+  return SPRITES.brute;
+}
+
+function drawFloor() {
+  const tile = SPRITES.floorTile;
+  const tileW = tile.width;
+  const tileH = tile.height;
+
+  for (let y = 0; y < PLAY_HEIGHT; y += tileH) {
+    for (let x = 0; x < PLAY_WIDTH; x += tileW) {
+      drawSprite(ctx, tile, x, y);
+    }
+  }
+}
+
+function drawWeaponPickup() {
+  const pickup = getWeaponPickupPosition();
+
+  if (!pickup) {
     return;
   }
 
-  const screenX = pickup.x;
-  const screenY = pickup.y + HUD_HEIGHT;
   const pulse = Math.sin(performance.now() / 200) * 3;
+  const size = WEAPON_PICKUP_SIZE;
 
-  ctx.fillStyle = "rgba(255, 136, 68, 0.25)";
-  ctx.fillRect(screenX - 6, screenY - 6 + pulse, SWORD_PICKUP_SIZE + 12, SWORD_PICKUP_SIZE + 12);
+  ctx.fillStyle = "rgba(255, 136, 68, 0.18)";
+  ctx.beginPath();
+  ctx.arc(pickup.x + size / 2, pickup.y + size / 2 + pulse, size * 0.55, 0, Math.PI * 2);
+  ctx.fill();
 
-  ctx.fillStyle = "#d0d0d0";
-  ctx.fillRect(screenX + 10, screenY + 2 + pulse, 8, 20);
-  ctx.fillStyle = "#8b4513";
-  ctx.fillRect(screenX + 6, screenY + 18 + pulse, 16, 6);
+  drawSprite(
+    ctx,
+    SPRITES.swordPickup,
+    pickup.x + 4,
+    pickup.y + 4 + pulse,
+    size - 8,
+    size - 8,
+  );
+}
 
-  ctx.fillStyle = "#ff8844";
-  ctx.font = "13px Arial";
+function drawPotionPickup() {
+  const room = getCurrentRoom();
+
+  if (!room.potionPickup || room.potionCollected) {
+    return;
+  }
+
+  const screenX = room.potionPickup.x;
+  const screenY = room.potionPickup.y;
+  const pulse = Math.sin(performance.now() / 220) * 3;
+  const size = POTION_PICKUP_SIZE;
+
+  ctx.fillStyle = "rgba(200, 80, 255, 0.18)";
+  ctx.beginPath();
+  ctx.arc(screenX + size / 2, screenY + size / 2 + pulse, size * 0.55, 0, Math.PI * 2);
+  ctx.fill();
+
+  drawSprite(ctx, SPRITES.potionHealth, screenX, screenY + pulse, size, size);
+}
+
+function drawChest() {
+  const room = getCurrentRoom();
+
+  if (!room.chest) {
+    return;
+  }
+
+  const screenX = room.chest.x;
+  const screenY = room.chest.y;
+  const pulse = room.chest.opened ? 0 : Math.sin(performance.now() / 260) * 2;
+  const sprite = room.chest.opened ? SPRITES.chestOpen : SPRITES.chestClosed;
+
+  if (!room.chest.opened) {
+    ctx.fillStyle = "rgba(255, 215, 0, 0.15)";
+    ctx.beginPath();
+    ctx.arc(
+      screenX + CHEST_SIZE / 2,
+      screenY + CHEST_SIZE / 2 + pulse,
+      CHEST_SIZE * 0.65,
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+  }
+
+  drawSprite(ctx, sprite, screenX, screenY + pulse, CHEST_SIZE, CHEST_SIZE);
+}
+
+function drawMobHpBar(mob: RuntimeMob) {
+  if (!isMobAlive(mob)) {
+    return;
+  }
+
+  const head = mob.segments[0];
+  const barWidth = 44;
+  const barHeight = 7;
+  const x = head.x + mob.size / 2 - barWidth / 2;
+  const y = head.y - 10;
+  const fillRatio = mob.hp / mob.maxHp;
+
+  ctx.fillStyle = "#222";
+  ctx.fillRect(x, y, barWidth, barHeight);
+
+  if (fillRatio > 0.5) {
+    ctx.fillStyle = "#66ff66";
+  } else if (fillRatio > 0.25) {
+    ctx.fillStyle = "#ffcc00";
+  } else {
+    ctx.fillStyle = "#ff5555";
+  }
+
+  ctx.fillRect(x, y, barWidth * fillRatio, barHeight);
+
+  ctx.strokeStyle = "#fff";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x, y, barWidth, barHeight);
+}
+
+function drawInventoryOverlay() {
+  const panelX = 180;
+  const panelY = 70;
+  const panelWidth = 440;
+  const panelHeight = 300;
+
+  ctx.fillStyle = "rgba(0, 0, 0, 0.82)";
+  ctx.fillRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+
+  ctx.fillStyle = "#1a1a1a";
+  ctx.fillRect(panelX, panelY, panelWidth, panelHeight);
+  ctx.strokeStyle = "#9b59ff";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(panelX, panelY, panelWidth, panelHeight);
+
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 22px Arial";
   ctx.textAlign = "center";
-  ctx.fillText("Sword — walk over to pick up", screenX + SWORD_PICKUP_SIZE / 2, screenY - 8 + pulse);
+  ctx.fillText("Inventory", panelX + panelWidth / 2, panelY + 32);
+
+  ctx.font = "14px Arial";
+  ctx.fillStyle = "#aaa";
+  ctx.fillText(
+    `${inventory.length}/${MAX_INVENTORY_SIZE} slots used`,
+    panelX + panelWidth / 2,
+    panelY + 54,
+  );
+
+  const slotX = panelX + 24;
+  let slotY = panelY + 78;
+  const slotWidth = panelWidth - 48;
+  const slotHeight = 44;
+
+  if (inventory.length === 0) {
+    ctx.fillStyle = "#666";
+    ctx.font = "16px Arial";
+    ctx.fillText("Empty — loot chests and explore", panelX + panelWidth / 2, panelY + 150);
+  } else {
+    ctx.textAlign = "left";
+    ctx.font = "15px Arial";
+
+    for (let i = 0; i < inventory.length; i++) {
+      const item = inventory[i];
+
+      ctx.fillStyle = "#2a2030";
+      ctx.fillRect(slotX, slotY, slotWidth, slotHeight);
+      ctx.strokeStyle = "#555";
+      ctx.strokeRect(slotX, slotY, slotWidth, slotHeight);
+
+      if (item.type === "health-potion") {
+        drawSprite(ctx, SPRITES.potionHealth, slotX + 8, slotY + 8, 28, 28);
+        ctx.fillStyle = "#fff";
+        ctx.fillText(`Health Potion — restores ${item.healAmount} HP`, slotX + 44, slotY + 27);
+      } else if (item.type === "strong-potion") {
+        drawSprite(ctx, SPRITES.potionStrong, slotX + 8, slotY + 8, 28, 28);
+        ctx.fillStyle = "#fff";
+        ctx.fillText(`Strong Potion — restores ${item.healAmount} HP`, slotX + 44, slotY + 27);
+      } else if (item.type === "weapon" && item.weaponId) {
+        drawSprite(ctx, SPRITES.swordPickup, slotX + 8, slotY + 8, 28, 28);
+        ctx.fillStyle = "#fff";
+        ctx.fillText(`${WEAPONS[item.weaponId].name} (stored)`, slotX + 44, slotY + 27);
+      }
+
+      if (item.type === "health-potion" && inventory.findIndex((entry) => entry.type === "health-potion") === i) {
+        ctx.fillStyle = "#888";
+        ctx.font = "12px Arial";
+        ctx.textAlign = "right";
+        ctx.fillText("Press 1", slotX + slotWidth - 10, slotY + 27);
+        ctx.textAlign = "left";
+        ctx.font = "15px Arial";
+      }
+
+      if (item.type === "strong-potion" && inventory.findIndex((entry) => entry.type === "strong-potion") === i) {
+        ctx.fillStyle = "#888";
+        ctx.font = "12px Arial";
+        ctx.textAlign = "right";
+        ctx.fillText("Press 2", slotX + slotWidth - 10, slotY + 27);
+        ctx.textAlign = "left";
+        ctx.font = "15px Arial";
+      }
+
+      slotY += slotHeight + 8;
+    }
+  }
+
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#888";
+  ctx.font = "13px Arial";
+  ctx.fillText("Press I or Inv to close", panelX + panelWidth / 2, panelY + panelHeight - 16);
   ctx.textAlign = "left";
 }
 
-function drawSwordTutorial() {
-  if (!hasSword || performance.now() >= swordTutorialUntil) {
+function drawWeaponTutorial() {
+  if (!hasUsableWeapon() || performance.now() >= weaponTutorialUntil) {
     return;
   }
 
   const bannerX = 60;
-  const bannerY = HUD_HEIGHT + 16;
+  const bannerY = 16;
   const bannerWidth = PLAY_WIDTH - 120;
   const bannerHeight = 64;
+  const def = getEquippedWeaponDef();
 
   ctx.fillStyle = "rgba(0, 0, 0, 0.85)";
   ctx.fillRect(bannerX, bannerY, bannerWidth, bannerHeight);
@@ -1338,12 +2050,12 @@ function drawSwordTutorial() {
   ctx.fillStyle = "#ff8844";
   ctx.font = "bold 20px Arial";
   ctx.textAlign = "center";
-  ctx.fillText("You found a sword!", PLAY_WIDTH / 2, bannerY + 26);
+  ctx.fillText(`Equipped ${def.name}!`, PLAY_WIDTH / 2, bannerY + 26);
 
   ctx.fillStyle = "#ffffff";
   ctx.font = "16px Arial";
   ctx.fillText(
-    "Press SPACE to swing. Each swing uses durability.",
+    "Press SPACE to attack. Each swing uses durability.",
     PLAY_WIDTH / 2,
     bannerY + 50,
   );
@@ -1356,7 +2068,7 @@ function drawFloorMessage() {
   }
 
   const bannerX = 140;
-  const bannerY = HUD_HEIGHT + PLAY_HEIGHT / 2 - 24;
+  const bannerY = PLAY_HEIGHT / 2 - 24;
   const bannerWidth = PLAY_WIDTH - 280;
   const bannerHeight = 48;
 
@@ -1374,39 +2086,44 @@ function drawFloorMessage() {
   ctx.textAlign = "left";
 }
 
-function drawEquippedSwordIcon(screenX: number, screenY: number) {
-  if (!hasUsableSword()) {
-    return;
-  }
-
-  const iconX = screenX + player.size - 10;
-  const iconY = screenY + 4;
-
-  ctx.fillStyle = "#d0d0d0";
-  ctx.fillRect(iconX, iconY, 4, 12);
-  ctx.fillStyle = "#8b4513";
-  ctx.fillRect(iconX - 2, iconY + 10, 8, 3);
-}
-
 function drawWeaponSwing() {
-  if (!hasUsableSword()) {
+  if (!hasUsableWeapon()) {
     return;
   }
 
   const now = performance.now();
 
-  if (now >= weapon.activeUntil) {
+  if (now >= weaponSwing.activeUntil) {
     return;
   }
 
-  const hitbox = getSwingHitbox();
+  const def = getEquippedWeaponDef();
+  const centerX = player.x + player.size / 2;
+  const centerY = player.y + player.size / 2;
+  const elapsed = now - weaponSwing.lastAttackAt;
+  const progress = Math.min(1, elapsed / def.durationMs);
+  const { start, end } = getSwingArcAngles();
+  const currentAngle = start + (end - start) * progress;
+  const arcSpan = Math.PI * 0.55;
+  const arcStart = currentAngle - arcSpan * 0.35;
+  const arcEnd = currentAngle + arcSpan * 0.15;
 
-  ctx.fillStyle = "rgba(255, 120, 40, 0.8)";
-  ctx.fillRect(hitbox.x, hitbox.y + HUD_HEIGHT, hitbox.w, hitbox.h);
-
-  ctx.strokeStyle = "#fff";
-  ctx.lineWidth = 2;
-  ctx.strokeRect(hitbox.x, hitbox.y + HUD_HEIGHT, hitbox.w, hitbox.h);
+  ctx.save();
+  ctx.strokeStyle = def.swingColor;
+  ctx.fillStyle = def.swingColor;
+  ctx.lineWidth = 5;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, def.range * 0.85, arcStart, arcEnd);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(centerX, centerY);
+  ctx.arc(centerX, centerY, def.range * 0.85, arcStart, arcEnd);
+  ctx.closePath();
+  ctx.globalAlpha = 0.35;
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.restore();
 }
 
 function draw() {
@@ -1414,54 +2131,86 @@ function draw() {
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+  drawFloor();
+
   ctx.fillStyle = room.background;
-  ctx.fillRect(0, HUD_HEIGHT, PLAY_WIDTH, PLAY_HEIGHT);
+  ctx.globalAlpha = 0.22;
+  ctx.fillRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
+  ctx.globalAlpha = 1;
 
   drawDoors(room);
   drawStairsTiles(room);
-  drawSwordPickup();
-  drawHud();
+  drawWeaponPickup();
+  drawPotionPickup();
+  drawChest();
 
-  const playerScreenX = player.x;
-  const playerScreenY = player.y + HUD_HEIGHT;
   const invincible = isPlayerInvincible();
   const showPlayer = !invincible || Math.floor(performance.now() / 100) % 2 === 0;
 
   if (showPlayer) {
-    ctx.fillStyle = invincible ? "#ff6666" : "cyan";
-    ctx.fillRect(playerScreenX, playerScreenY, player.size, player.size);
-    drawFacingIndicator(playerScreenX, playerScreenY);
-    drawEquippedSwordIcon(playerScreenX, playerScreenY);
+    const playerSprite = getPlayerSprite();
+
+    if (invincible) {
+      drawTintedSprite(
+        ctx,
+        playerSprite,
+        player.x,
+        player.y,
+        player.size,
+        "#ff6666",
+        0.55,
+      );
+    } else {
+      drawSprite(ctx, playerSprite, player.x, player.y, player.size, player.size);
+    }
   }
 
   drawWeaponSwing();
-  drawSwordTutorial();
-  drawFloorMessage();
 
-  ctx.fillStyle = "gold";
-  ctx.fillRect(coin.x, coin.y + HUD_HEIGHT, coin.size, coin.size);
+  drawSpriteCentered(ctx, SPRITES.coin, coin.x + coin.size / 2, coin.y + coin.size / 2, coin.size);
 
-  if (isSnakeAlive()) {
-    ctx.fillStyle = "lime";
+  for (const mob of activeMobs) {
+    if (isMobAlive(mob)) {
+      const colors = MOB_COLORS[mob.type];
+      const hit = performance.now() < mob.hitFlashUntil;
 
-    for (const segment of snake.segments) {
-      ctx.fillRect(segment.x, segment.y + HUD_HEIGHT, snake.size, snake.size);
+      mob.segments.forEach((segment, index) => {
+        const sprite = getMobSprite(mob, index);
+
+        if (hit) {
+          drawTintedSprite(ctx, sprite, segment.x, segment.y, mob.size, colors.hit, 0.5);
+        } else {
+          drawSprite(ctx, sprite, segment.x, segment.y, mob.size, mob.size);
+        }
+      });
+
+      drawMobHpBar(mob);
+    } else if (performance.now() < mob.deadUntil) {
+      const config = getCurrentRoom().enemies[mob.configIndex];
+      const anchor = config.segments[0] ?? { x: PLAY_WIDTH / 2, y: PLAY_HEIGHT / 2 };
+      ctx.fillStyle = "rgba(255,255,255,0.7)";
+      ctx.font = "14px Arial";
+      ctx.textAlign = "center";
+      const secondsLeft = Math.ceil((mob.deadUntil - performance.now()) / 1000);
+      ctx.fillText(
+        `${MOB_TYPE_LABELS[mob.type]} respawns in ${secondsLeft}s`,
+        anchor.x + mob.size / 2,
+        anchor.y - 8,
+      );
+      ctx.textAlign = "left";
     }
-  } else if (performance.now() < snakeDeadUntil) {
-    ctx.fillStyle = "white";
-    ctx.font = "18px Arial";
-    ctx.textAlign = "center";
-    const secondsLeft = Math.ceil((snakeDeadUntil - performance.now()) / 1000);
-    ctx.fillText(
-      `Snake respawns in ${secondsLeft}s`,
-      PLAY_WIDTH / 2,
-      HUD_HEIGHT + PLAY_HEIGHT / 2,
-    );
-    ctx.textAlign = "left";
   }
+
+  drawWeaponTutorial();
+  drawFloorMessage();
+  updateHtmlHud();
 
   if (mapOpen) {
     drawMapOverlay();
+  }
+
+  if (inventoryOpen) {
+    drawInventoryOverlay();
   }
 }
 
@@ -1478,3 +2227,4 @@ function gameLoop() {
 playBtn.addEventListener("click", startGame);
 menuBtn.addEventListener("click", showMenu);
 mapBtn.addEventListener("click", toggleMap);
+invBtn.addEventListener("click", toggleInventory);

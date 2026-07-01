@@ -106,15 +106,7 @@ export function isExecutionerDeathComplete(state: ExecutionerBossState) {
 }
 
 export function isExecutionerBossContactActive(state: ExecutionerBossState) {
-  if (state.phase === "swing") {
-    return state.animFrame >= 2 && state.animFrame <= 4;
-  }
-
-  if (state.phase === "appear") {
-    return state.animFrame >= 1;
-  }
-
-  return false;
+  return state.phase !== "hidden" && state.phase !== "vanish" && state.phase !== "dying";
 }
 
 export function updateExecutionerBoss(

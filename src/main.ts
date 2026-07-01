@@ -2217,6 +2217,10 @@ function damageMob(mob: RuntimeMob, amount: number) {
 }
 
 function applyKnockback(mob: RuntimeMob, knockback: number) {
+  if (mob.type === "boss") {
+    return;
+  }
+
   let dx = 0;
   let dy = 0;
 

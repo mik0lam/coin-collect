@@ -1,0 +1,257 @@
+CAVERN CRAWLER — MULTIPLAYER DESIGN DRAFT
+=========================================
+Last updated: 2026-06-30
+
+This document describes a planned co-op multiplayer mode for Cavern Crawler.
+Nothing here is implemented yet — it is a roadmap for future work.
+
+
+1. GOALS & NON-GOALS
+--------------------
+
+Goals:
+  - Co-op dungeon crawling (2–4 players, same run, same floors/rooms)
+  - Same combat, loot, bosses, shops, and stairs as single-player
+  - Disconnect recovery where possible
+  - Incremental refactor from current architecture (not a full rewrite)
+
+Non-goals (v1):
+  - PvP or friendly fire
+  - Cross-run persistence / MMO hub
+  - Competitive ranked ladder
+  - Full rollback netcode (Overwatch-style)
+
+
+2. RECOMMENDED MODE: SHARED-WORLD CO-OP
+---------------------------------------
+
+  Players:     2–4
+  World:       One run, one seed, shared floors/rooms
+  Death:       Dead player spectates; run ends when all dead (v1)
+  Economy:     Shared score / scrap / void shards (v1)
+  Loot:        First player to overlap pickup gets item (current behavior)
+
+Why not PvP:
+  Mob AI chases a single player position. Weapons, contact damage, and boss
+  lasers all assume one local player. Co-op extends that model; PvP needs new rules.
+
+
+3. ARCHITECTURE: HOST-AUTHORITATIVE (v1)
+----------------------------------------
+
+  [Host browser]  <--WebSocket-->  [Client 2]
+       |                               |
+       +--------WebSocket------------- [Client 3]
+
+  - Host runs the simulation and owns authoritative state
+  - Clients send input commands; host sends snapshots + events
+  - Static Vite client + small Node WebSocket relay for lobbies
+  - Path to dedicated server later (same message protocol)
+
+Alternatives considered:
+  - Dedicated server: fairer, no host migration, but costs infra
+  - WebRTC mesh: lower LAN latency, but NAT/reconnect pain — skip until co-op proven
+
+
+4. STATE TO EXTRACT FROM main.ts
+--------------------------------
+
+Today ~50 module-level globals live in main.ts. Multiplayer needs one tree:
+
+  MultiplayerRunState
+    runId, runSeed, tick, currentDepth, currentRoomId
+    legendaryPool { golemClubUnlocked }
+    players: Record<PlayerId, PlayerState>
+    floors: Record<number, Floor>
+    visitedRooms: string[]
+    activeMobs: RuntimeMob[]
+    roomRuntime flags (chest opened, coin collected, etc.)
+
+  PlayerState
+    id, name, x, y, facing
+    hp { current, max }, invincibleUntilTick
+    inventory[], activeWeaponSlot
+    score, voidShards, scrap, armorTier, hasDash, isDead
+
+Refactor order:
+  1. RunState + PlayerState types in types.ts
+  2. createRunState() / getters in runState.ts
+  3. Pure functions: applyInput(state, playerId, cmd), simulateTick(state, dt)
+  4. main.ts becomes: input → send cmd → render snapshot
+
+
+5. NETWORKING
+-------------
+
+Transport:  WebSocket (JSON prototype, MessagePack later)
+Sim tick:   20 Hz (50 ms)
+Snapshots:  10–20 Hz to clients
+Input:      Every sim tick from each player
+
+Client → Host messages:
+  join { lobbyCode, playerName }
+  input { tick, playerId, cmd: InputCommand }
+  interact { tick, action }
+  inventory { action }
+  stairs_confirm { direction }
+  ping
+
+Host → Client messages:
+  welcome { playerId, runSeed, snapshot }
+  snapshot { tick, partial state }
+  events { tick, GameEvent[] }
+  player_joined / player_left
+  run_ended { reason, stats }
+
+InputCommand (not raw keys):
+  move: { x, y }   // -1..1 from WASD
+  attack: boolean
+  dash: boolean
+
+Host applies inputs for tick T. Never trust client position, HP, or inventory.
+
+
+6. DETERMINISM & RNG
+--------------------
+
+Seeded / reproducible today:
+  - Floor layout: createRng(runSeed + depth * 9973) in floorGeneration.ts
+  - Room content, spawn positions via passed rng
+
+Must fix for multiplayer:
+  - runSeed from Math.random() → host generates once, broadcasts
+  - Scrap drops, slot machine, slot chest, golem attack rolls → seeded streams
+  - All performance.now() timers → simTick * TICK_MS (50 ms)
+
+Run-scoped mutable (sync required):
+  - legendaryPool golemClubUnlocked
+  - Per-room flags, enemy HP, opened chests
+
+
+7. CO-OP GAMEPLAY RULES
+-----------------------
+
+Mob AI:
+  Replace single player.x/y chase with nearest living player in room.
+
+Boss:
+  - Target nearest player for laser wind-up and chase
+  - One heart + one club drop; first pickup wins (or duplicate in v2)
+
+Stairs:
+  - All living players on stairs tile, OR majority Y/E confirm
+  - Teleport all players on room transition
+
+Shop:
+  - Shared wallet; one shop UI at a time near station
+
+Death:
+  v1: dead player spectates; run ends when all dead
+  v2: respawn tokens / revive on room clear
+
+
+8. SYNC SCOPE
+-------------
+
+Always sync (current room):
+  - All PlayerState in room
+  - activeMobs + golem projectiles/lasers
+  - Room flags
+
+On demand:
+  - Floor layout: client generates from runSeed (preferred)
+  - Inventory changes: event + delta
+
+Never sync:
+  - Encyclopedia scroll, debug overlays, menu animations
+
+
+9. CLIENT PREDICTION (v1.1)
+---------------------------
+
+Local player only:
+  - Apply movement immediately
+  - Reconcile when snapshot differs beyond threshold
+Remote players:
+  - Interpolate between last two snapshots (~100 ms buffer)
+
+
+10. LOBBY FLOW
+--------------
+
+  Main Menu
+    Solo Play (existing)
+    Host Game → 6-char code → waiting room → Start
+    Join Game → enter code + name → waiting room
+
+  Disconnect:
+    Client: mark disconnected, zero input, allow reconnect 60s
+    Host:  run ends in v1; host migration in v2
+
+
+11. UI CHANGES
+--------------
+
+  - Host / Join on main menu
+  - Other player HP bars / nameplates (color tint per player)
+  - Map: other player dots
+  - Stairs: "Waiting for party (2/3 on stairs)"
+  - Game over: all players' stats
+
+
+12. HOSTING
+-----------
+
+Dev:
+  npm run dev          → Vite :5173
+  npm run server:dev   → Node WS :3001
+
+Production:
+  Static client (GitHub Pages / Netlify)
+  WebSocket lobby on Railway / Fly.io / Render
+  Env: VITE_WS_URL=wss://your-server.example.com
+
+
+13. FILE PLAN
+-------------
+
+  src/multiplayer/
+    types.ts, lobby.ts, netClient.ts, netHost.ts, snapshot.ts, reconcile.ts
+  src/sim/
+    runState.ts, simulateTick.ts, inputBuffer.ts, simClock.ts
+  server/
+    index.ts, hostRelay.ts
+
+Keep as pure logic on host:
+  floorGeneration.ts, shop.ts, crafting.ts, weaponAbilities.ts
+
+
+14. PHASED ROADMAP
+------------------
+
+Phase 0 — Foundation (1–2 weeks)
+  [ ] Extract RunState / PlayerState from main.ts
+  [ ] Sim ticks replace performance.now() in combat/movement
+  [ ] Route all Math.random() through seeded RNG
+  [ ] Single-player still works identically
+
+Phase 1 — LAN prototype (2–3 weeks)
+  [ ] Node WebSocket server + lobby codes
+  [ ] Host sim, 1 client, position + mob sync
+
+Phase 2 — Full co-op (2–3 weeks)
+  [ ] Up to 4 players, inventory/shop/boss/stairs
+  [ ] Nearest-player mob AI, party wipe game over
+
+Phase 3 — Polish (2+ weeks)
+  [ ] Client prediction, reconnect, delta snapshots, host migration
+
+
+15. OPEN QUESTIONS
+------------------
+
+  1. Max party size: 2 or 4?
+  2. Loot: free-for-all or instanced per player?
+  3. Death: spectate only or respawn?
+  4. Stairs: everyone ready or one player pulls party?
+  5. Internet play (need relay) or mostly LAN?

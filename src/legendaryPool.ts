@@ -1,4 +1,4 @@
-import { LEGENDARY_WEAPON_IDS, BOSS_WEAPON_ID } from "./constants";
+import { LEGENDARY_WEAPON_IDS, BOSS_WEAPON_ID, getOneStarWeaponIds } from "./constants";
 import type { WeaponId } from "./types";
 
 let golemClubUnlocked = false;
@@ -13,6 +13,10 @@ export function unlockGolemClubLegendary() {
 
 export function isGolemClubInLegendaryPool() {
   return golemClubUnlocked;
+}
+
+export function getOneStarWeaponPool(): WeaponId[] {
+  return getOneStarWeaponIds();
 }
 
 export function getLegendaryWeaponPool(): WeaponId[] {

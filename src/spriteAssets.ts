@@ -23,8 +23,100 @@ export const TILE_DRAW_SIZE = 32;
 export const TILE_SCALE = TILE_DRAW_SIZE / TILE_SIZE;
 const HERO_FRAME = 40;
 export const HERO_DRAW_SIZE = 64;
-export const HERO_HITBOX_SIZE = HERO_FRAME;
-export const HERO_HITBOX_INSET = (HERO_DRAW_SIZE - HERO_HITBOX_SIZE) / 2;
+
+export type HeroHitbox = {
+  insetX: number;
+  insetY: number;
+  w: number;
+  h: number;
+};
+
+const DEFAULT_HERO_HITBOX: HeroHitbox = {
+  insetX: 12,
+  insetY: 12,
+  w: 40,
+  h: 40,
+};
+
+let heroHitbox: HeroHitbox = { ...DEFAULT_HERO_HITBOX };
+
+export function getHeroHitbox() {
+  return heroHitbox;
+}
+
+function measureOpaqueBounds(canvas: HTMLCanvasElement, alphaThreshold = 24): HeroHitbox {
+  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+
+  if (!ctx) {
+    return { ...DEFAULT_HERO_HITBOX };
+  }
+
+  const { width, height } = canvas;
+  const { data } = ctx.getImageData(0, 0, width, height);
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const alpha = data[(y * width + x) * 4 + 3];
+
+      if (alpha > alphaThreshold) {
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
+      }
+    }
+  }
+
+  if (maxX < minX) {
+    return { ...DEFAULT_HERO_HITBOX };
+  }
+
+  const pad = 2;
+  minX = Math.min(minX + pad, maxX);
+  minY = Math.min(minY + pad, maxY);
+  maxX = Math.max(maxX - pad, minX);
+  maxY = Math.max(maxY - pad, minY);
+
+  return {
+    insetX: minX,
+    insetY: minY,
+    w: maxX - minX + 1,
+    h: maxY - minY + 1,
+  };
+}
+
+function unionHeroHitboxes(...boxes: HeroHitbox[]): HeroHitbox {
+  if (boxes.length === 0) {
+    return { ...DEFAULT_HERO_HITBOX };
+  }
+
+  let minX = HERO_DRAW_SIZE;
+  let minY = HERO_DRAW_SIZE;
+  let maxX = 0;
+  let maxY = 0;
+
+  for (const box of boxes) {
+    minX = Math.min(minX, box.insetX);
+    minY = Math.min(minY, box.insetY);
+    maxX = Math.max(maxX, box.insetX + box.w);
+    maxY = Math.max(maxY, box.insetY + box.h);
+  }
+
+  return {
+    insetX: minX,
+    insetY: minY,
+    w: maxX - minX,
+    h: maxY - minY,
+  };
+}
+
+function initHeroHitbox(facingSprites: HTMLCanvasElement[]) {
+  heroHitbox = unionHeroHitboxes(...facingSprites.map((sprite) => measureOpaqueBounds(sprite)));
+}
 
 /**
  * Pixel Poem dungeon tileset (10×10 grid of 16px tiles).
@@ -282,12 +374,19 @@ export async function loadAssetSprites() {
   const cornerTRSprite = sliceTileset(tileset, ...DUNGEON_TILES.cornerTR);
   const cornerBLSprite = sliceTileset(tileset, ...DUNGEON_TILES.cornerBL);
 
+  const playerSouth = sliceHeroFrame(heroDown);
+  const playerNorth = sliceHeroFrame(heroUp);
+  const playerWest = sliceHeroFrame(heroLeft);
+  const playerEast = sliceHeroFrame(heroRight);
+
+  initHeroHitbox([playerSouth, playerNorth, playerWest, playerEast]);
+
   applySpriteOverrides(
     {
-      playerSouth: sliceHeroFrame(heroDown),
-      playerNorth: sliceHeroFrame(heroUp),
-      playerWest: sliceHeroFrame(heroLeft),
-      playerEast: sliceHeroFrame(heroRight),
+      playerSouth,
+      playerNorth,
+      playerWest,
+      playerEast,
       coin: imageToCanvas(coin),
       voidShard: imageToCanvas(voidShard),
       slotMachine: imageToCanvas(slotMachine),

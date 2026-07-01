@@ -165,6 +165,19 @@ export const LEGENDARY_WEAPON_IDS: WeaponId[] = [
   "phantom-blade",
 ];
 
+export function isOneStarWeapon(weaponId: WeaponId) {
+  const def = WEAPONS[weaponId];
+  return def.rarity === "legendary" && (!def.stars || def.stars <= 1);
+}
+
+export function getOneStarWeaponIds(): WeaponId[] {
+  return ALL_WEAPON_IDS.filter(isOneStarWeapon);
+}
+
+export function getNormalWeaponIds(): WeaponId[] {
+  return ALL_WEAPON_IDS.filter((id) => !isOneStarWeapon(id) && id !== BOSS_WEAPON_ID);
+}
+
 export const BOSS_WEAPON_ID: WeaponId = "golem-club";
 
 export const ALL_WEAPON_IDS = Object.keys(WEAPONS) as WeaponId[];

@@ -1,12 +1,12 @@
 import { SPRITES } from "./sprites";
 import { TILE_SCALE } from "./spriteAssets";
 import {
-  ALL_WEAPON_IDS,
   ALL_MOB_TYPES,
   BOSS_FLOOR_INTERVAL,
   BOSS_HEART_HP_BONUS,
-  BOSS_WEAPON_ID,
   CHEST_SIZE,
+  getNormalWeaponIds,
+  LEGENDARY_WEAPON_IDS,
   PLAY_HEIGHT,
   PLAY_WIDTH,
   POTION_PICKUP_SIZE,
@@ -18,7 +18,7 @@ import {
   VOID_SHARD_FLOOR_INTERVAL,
   VOID_SHARD_SIZE,
 } from "./constants";
-import { getLegendaryWeaponPool } from "./legendaryPool";
+import { getOneStarWeaponPool } from "./legendaryPool";
 import { createRng } from "./rng";
 import { findLayoutPosition, findOpenPosition, isSnakeSpawnClear } from "./placement";
 import {
@@ -127,18 +127,15 @@ function generateChestLoot(depth: number, rng: () => number): ChestLoot {
   const roll = rng();
 
   if (roll < 0.5) {
-    const legendaryPool = getLegendaryWeaponPool();
-    const normalPool = ALL_WEAPON_IDS.filter(
-      (id) => !legendaryPool.includes(id) && id !== BOSS_WEAPON_ID,
-    );
+    const normalPool = getNormalWeaponIds();
     return { kind: "weapon", weaponId: normalPool[Math.floor(rng() * normalPool.length)] };
   }
 
   if (roll < 0.58 && depth >= 4) {
-    const legendaryPool = getLegendaryWeaponPool();
+    const oneStarPool = getOneStarWeaponPool();
     return {
       kind: "weapon",
-      weaponId: legendaryPool[Math.floor(rng() * legendaryPool.length)],
+      weaponId: oneStarPool[Math.floor(rng() * oneStarPool.length)],
     };
   }
 
@@ -231,7 +228,7 @@ function placeVoidShardAndSlotMachine(
     y: chestPos.y,
     opened: false,
     variant: "slot",
-    loot: { kind: "health-potion", healAmount: 25 + depth * 5 },
+    loot: { kind: "weapon", weaponId: LEGENDARY_WEAPON_IDS[0] },
   };
 }
 
@@ -451,8 +448,6 @@ function generateBossFloor(depth: number, seed: number, coinSize: number): Floor
     occ.push(...room.obstacles);
     return occ;
   });
-
-  bossBuilt.room.stairsDownTile = stairsTilePosition("down");
 
   if (depth > 1) {
     prepBuilt.room.stairsUpTile = stairsTilePosition("up");

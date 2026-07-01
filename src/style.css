@@ -305,6 +305,29 @@ canvas {
   color: #ff8888;
 }
 
+.menu-title-logo {
+  display: block;
+  width: min(100%, 440px);
+  height: auto;
+  margin: 0 auto 0.65rem;
+  background: none;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  filter: drop-shadow(0 3px 0 rgba(0, 0, 0, 0.9));
+  animation: menu-logo-float 4.8s ease-in-out infinite;
+}
+
+@keyframes menu-logo-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-5px);
+  }
+}
+
 .menu-title {
   margin: 0 0 0.35rem;
   line-height: 0.95;

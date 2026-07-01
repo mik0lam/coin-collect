@@ -1,10 +1,13 @@
 import "./style.css";
-import { SPRITES, drawSprite, drawSpriteCentered, drawTintedSprite, getWeaponSprite, FLOOR_TILES } from "./sprites";
-import { loadAssetSprites, HERO_DRAW_SIZE, HERO_HITBOX_INSET, HERO_HITBOX_SIZE, TILE_DRAW_SIZE, TILE_SCALE } from "./spriteAssets";
+import titleLogoUrl from "../newsprites/titlelog.png";
+import { SPRITES, drawSprite, drawSpriteCentered, drawTintedSprite, getWeaponSprite, drawWeaponSwingSprite, FLOOR_TILES } from "./sprites";
+import { loadAssetSprites, getHeroHitbox, HERO_DRAW_SIZE, TILE_DRAW_SIZE, TILE_SCALE } from "./spriteAssets";
 import { loadGolemSprites, areGolemSpritesLoaded, getLaserFrame } from "./golemSprites";
+import { loadWeaponSprites } from "./weaponSprites";
 import { clampDeltaMs, deltaScale, TARGET_FRAME_MS } from "./timing";
 import {
   getLegendaryWeaponPool,
+  getOneStarWeaponPool,
   resetLegendaryPool,
   unlockGolemClubLegendary,
 } from "./legendaryPool";
@@ -131,10 +134,14 @@ app.innerHTML = `
     </div>
     <div class="menu-content">
       <p class="menu-eyebrow">Pixel dungeon descent</p>
-      <h1 class="menu-title">
-        <span class="menu-title-line">Cavern</span>
-        <span class="menu-title-line menu-title-accent">Crawler</span>
-      </h1>
+      <img
+        id="menu-title-logo"
+        class="menu-title-logo"
+        src="${titleLogoUrl}"
+        alt="Cavern Crawlers"
+        width="440"
+        height="220"
+      />
       <p class="menu-tagline">Loot chests · Slay mobs · Delve deeper</p>
       <canvas id="menu-art" class="menu-art" width="360" height="128" aria-hidden="true"></canvas>
       <div class="menu-actions">
@@ -648,17 +655,20 @@ window.addEventListener("keyup", (event) => {
 });
 
 function getPlayerCollisionBox(drawX = player.x, drawY = player.y) {
+  const hitbox = getHeroHitbox();
+
   return {
-    x: drawX + HERO_HITBOX_INSET,
-    y: drawY + HERO_HITBOX_INSET,
-    w: HERO_HITBOX_SIZE,
-    h: HERO_HITBOX_SIZE,
+    x: drawX + hitbox.insetX,
+    y: drawY + hitbox.insetY,
+    w: hitbox.w,
+    h: hitbox.h,
   };
 }
 
 function setPlayerDrawPositionFromHitbox(hitboxX: number, hitboxY: number) {
-  player.x = hitboxX - HERO_HITBOX_INSET;
-  player.y = hitboxY - HERO_HITBOX_INSET;
+  const hitbox = getHeroHitbox();
+  player.x = hitboxX - hitbox.insetX;
+  player.y = hitboxY - hitbox.insetY;
 }
 
 function collidesWithObstacles(
@@ -668,7 +678,53 @@ function collidesWithObstacles(
   return collidesWithRoomObstacles(box, room);
 }
 
-function resolveObstaclePosition(
+function collidesWithMobSegments(box: { x: number; y: number; w: number; h: number }) {
+  for (const mob of activeMobs) {
+    if (!isMobAlive(mob)) {
+      continue;
+    }
+
+    for (const segment of mob.segments) {
+      if (
+        boxesOverlap(box, {
+          x: segment.x,
+          y: segment.y,
+          w: mob.size,
+          h: mob.size,
+        })
+      ) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+
+function resolvePositionAgainst(
+  x: number,
+  y: number,
+  prevX: number,
+  prevY: number,
+  isBlocked: (x: number, y: number) => boolean,
+) {
+  if (!isBlocked(x, y)) {
+    return { x, y };
+  }
+
+  if (!isBlocked(x, prevY)) {
+    return { x, y: prevY };
+  }
+
+  if (!isBlocked(prevX, y)) {
+    return { x: prevX, y };
+  }
+
+  return { x: prevX, y: prevY };
+}
+
+function resolvePlayerPosition(
   x: number,
   y: number,
   w: number,
@@ -676,19 +732,67 @@ function resolveObstaclePosition(
   prevX: number,
   prevY: number,
 ) {
-  if (!collidesWithObstacles({ x, y, w, h })) {
-    return { x, y };
+  return resolvePositionAgainst(x, y, prevX, prevY, (nextX, nextY) => {
+    const box = { x: nextX, y: nextY, w, h };
+    return collidesWithObstacles(box) || collidesWithMobSegments(box);
+  });
+}
+
+function resolveMobPosition(
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  prevX: number,
+  prevY: number,
+) {
+  return resolvePositionAgainst(x, y, prevX, prevY, (nextX, nextY) =>
+    collidesWithObstacles({ x: nextX, y: nextY, w, h }),
+  );
+}
+
+function mobBoxOverlapsPlayer(x: number, y: number, size: number) {
+  return boxesOverlap(getPlayerCollisionBox(), { x, y, w: size, h: size });
+}
+
+function resolvePlayerMobOverlap() {
+  const hitbox = getHeroHitbox();
+  let boxX = player.x + hitbox.insetX;
+  let boxY = player.y + hitbox.insetY;
+  const boxW = hitbox.w;
+  const boxH = hitbox.h;
+
+  for (const mob of activeMobs) {
+    if (!isMobAlive(mob)) {
+      continue;
+    }
+
+    for (const segment of mob.segments) {
+      const playerBox = { x: boxX, y: boxY, w: boxW, h: boxH };
+      const mobBox = { x: segment.x, y: segment.y, w: mob.size, h: mob.size };
+
+      if (!boxesOverlap(playerBox, mobBox)) {
+        continue;
+      }
+
+      const overlapLeft = boxX + boxW - segment.x;
+      const overlapRight = segment.x + mob.size - boxX;
+      const overlapTop = boxY + boxH - segment.y;
+      const overlapBottom = segment.y + mob.size - boxY;
+      const minOverlapX = Math.min(overlapLeft, overlapRight);
+      const minOverlapY = Math.min(overlapTop, overlapBottom);
+
+      if (minOverlapX < minOverlapY) {
+        boxX += overlapLeft < overlapRight ? -minOverlapX : minOverlapX;
+      } else {
+        boxY += overlapTop < overlapBottom ? -minOverlapY : minOverlapY;
+      }
+    }
   }
 
-  if (!collidesWithObstacles({ x, y: prevY, w, h })) {
-    return { x, y: prevY };
-  }
-
-  if (!collidesWithObstacles({ x: prevX, y, w, h })) {
-    return { x: prevX, y };
-  }
-
-  return { x: prevX, y: prevY };
+  setPlayerDrawPositionFromHitbox(boxX, boxY);
+  player.x = Math.max(0, Math.min(PLAY_WIDTH - player.size, player.x));
+  player.y = Math.max(0, Math.min(PLAY_HEIGHT - player.size, player.y));
 }
 
 function clampMobToRoom(mob: RuntimeMob, segmentIndex: number) {
@@ -699,7 +803,7 @@ function clampMobToRoom(mob: RuntimeMob, segmentIndex: number) {
   segment.x = Math.max(0, Math.min(PLAY_WIDTH - mob.size, segment.x));
   segment.y = Math.max(0, Math.min(PLAY_HEIGHT - mob.size, segment.y));
 
-  const resolved = resolveObstaclePosition(
+  const resolved = resolveMobPosition(
     segment.x,
     segment.y,
     mob.size,
@@ -710,6 +814,24 @@ function clampMobToRoom(mob: RuntimeMob, segmentIndex: number) {
 
   segment.x = resolved.x;
   segment.y = resolved.y;
+}
+
+function getStairsTilePosition(kind: "down" | "up" = "down") {
+  const sprite = kind === "up" ? SPRITES.stairsUp : SPRITES.stairsDown;
+  const { w, h } = spriteDrawSize(sprite);
+
+  return {
+    x: PLAY_WIDTH / 2 - w / 2,
+    y: PLAY_HEIGHT / 2 - h / 2,
+  };
+}
+
+function spawnBossDownStairs(room: Room) {
+  if (room.stairsDownTile) {
+    return;
+  }
+
+  room.stairsDownTile = getStairsTilePosition("down");
 }
 
 function spriteDrawSize(sprite: HTMLCanvasElement) {
@@ -1571,13 +1693,14 @@ function slayMob(mob: RuntimeMob) {
   if (mob.type === "boss" && head) {
     room.bossDefeated = true;
     unlockGolemClubLegendary();
+    spawnBossDownStairs(room);
     room.bossHeartPickup = { x: head.x - 24, y: head.y };
     room.bossWeaponPickup = {
       x: head.x + 36,
       y: head.y,
       weaponId: BOSS_WEAPON_ID,
     };
-    showFloorMessage("Boss defeated! Claim the Heart Container and Golem Club.");
+    showFloorMessage("Boss defeated! Ladder down opened — claim the Heart Container and Golem Club.");
     return;
   }
 
@@ -1646,7 +1769,7 @@ function applyKnockback(mob: RuntimeMob, knockback: number) {
     const prevY = segment.y;
     segment.x = Math.max(0, Math.min(PLAY_WIDTH - mob.size, segment.x + dx));
     segment.y = Math.max(0, Math.min(PLAY_HEIGHT - mob.size, segment.y + dy));
-    const resolved = resolveObstaclePosition(
+    const resolved = resolveMobPosition(
       segment.x,
       segment.y,
       mob.size,
@@ -2236,7 +2359,7 @@ function movePlayer(dt: number) {
   const collisionPrev = getPlayerCollisionBox(prevX, prevY);
   const collisionNext = getPlayerCollisionBox();
 
-  const resolved = resolveObstaclePosition(
+  const resolved = resolvePlayerPosition(
     collisionNext.x,
     collisionNext.y,
     collisionNext.w,
@@ -2285,12 +2408,16 @@ function isPlayerHitByMobs() {
 
     for (const segment of mob.segments) {
       if (
-        boxesOverlap(getPlayerCollisionBox(), {
-          x: segment.x,
-          y: segment.y,
-          w: mob.size,
-          h: mob.size,
-        })
+        boxesOverlap(
+          getPlayerCollisionBox(),
+          {
+            x: segment.x,
+            y: segment.y,
+            w: mob.size,
+            h: mob.size,
+          },
+          4,
+        )
       ) {
         return mob.contactDamage;
       }
@@ -2326,8 +2453,13 @@ function moveMob(mob: RuntimeMob, dt: number) {
   const distance = Math.sqrt(dx * dx + dy * dy);
 
   if (distance > 0) {
-    head.x += (dx / distance) * mob.speed * dt;
-    head.y += (dy / distance) * mob.speed * dt;
+    const nextX = head.x + (dx / distance) * mob.speed * dt;
+    const nextY = head.y + (dy / distance) * mob.speed * dt;
+
+    if (!mobBoxOverlapsPlayer(nextX, nextY, mob.size)) {
+      head.x = nextX;
+      head.y = nextY;
+    }
   }
 
   clampMobToRoom(mob, 0);
@@ -2342,8 +2474,13 @@ function moveMob(mob: RuntimeMob, dt: number) {
       const spacing = mob.size + 4;
 
       if (followDistance > spacing) {
-        current.x += (followDx / followDistance) * mob.speed * dt;
-        current.y += (followDy / followDistance) * mob.speed * dt;
+        const nextX = current.x + (followDx / followDistance) * mob.speed * dt;
+        const nextY = current.y + (followDy / followDistance) * mob.speed * dt;
+
+        if (!mobBoxOverlapsPlayer(nextX, nextY, mob.size)) {
+          current.x = nextX;
+          current.y = nextY;
+        }
       }
 
       clampMobToRoom(mob, i);
@@ -2470,7 +2607,7 @@ function collectChestLoot(loot: ChestLoot) {
     const slot = addWeaponToInventory(loot.weaponId);
 
     if (slot !== null) {
-      showFloorMessage(`${WEAPONS[loot.weaponId].name} → slot ${slot + 1}`);
+      showFloorMessage(`${formatWeaponName(loot.weaponId)} → slot ${slot + 1}`);
     }
 
     return;
@@ -2733,6 +2870,14 @@ function tryOpenChest() {
   }
 
   room.chest.opened = true;
+
+  if (room.chest.variant === "slot") {
+    const oneStarPool = getOneStarWeaponPool();
+    const weaponId = oneStarPool[Math.floor(Math.random() * oneStarPool.length)];
+    collectChestLoot({ kind: "weapon", weaponId });
+    return;
+  }
+
   collectChestLoot(room.chest.loot);
 }
 
@@ -2757,6 +2902,7 @@ function update() {
   if (!spinning && !shopOpen) {
     movePlayer(dt);
     moveMobs(dt);
+    resolvePlayerMobOverlap();
     updateWeapon();
 
     const contactDamage = isPlayerHitByMobs();
@@ -3203,6 +3349,13 @@ function drawPlayer() {
     ctx.strokeStyle = "rgba(120, 200, 255, 0.8)";
     ctx.lineWidth = 2;
     ctx.strokeRect(player.x + 2, player.y + 2, player.size - 4, player.size - 4);
+  }
+
+  if (debugMode) {
+    const hitbox = getPlayerCollisionBox();
+    ctx.strokeStyle = "rgba(80, 255, 120, 0.95)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(hitbox.x + 0.5, hitbox.y + 0.5, hitbox.w - 1, hitbox.h - 1);
   }
 }
 
@@ -3981,10 +4134,7 @@ function drawWeaponSwing() {
   const arcStart = start;
   const arcEnd = start + (end - start) * progress;
   const radius = weaponSwing.range * 0.92;
-  const bladeAngle = arcStart + (arcEnd - arcStart) * 0.88;
-  const bladeDist = radius * (weaponSwing.weaponId === "dagger" ? 0.62 : 0.78);
-  const tipX = centerX + Math.cos(bladeAngle) * bladeDist;
-  const tipY = centerY + Math.sin(bladeAngle) * bladeDist;
+  const swingAngle = arcStart + (arcEnd - arcStart) * progress;
   const sprite = getWeaponSprite(weaponSwing.weaponId);
   const spriteSize = weaponSwing.swingSpriteSize;
   const trailWidth = weaponSwing.weaponId === "war-axe" ? 6 : weaponSwing.weaponId === "dagger" ? 2.5 : 4;
@@ -4008,9 +4158,7 @@ function drawWeaponSwing() {
   ctx.stroke();
 
   ctx.globalAlpha = 1;
-  ctx.translate(tipX, tipY);
-  ctx.rotate(bladeAngle + Math.PI * 0.68);
-  drawSprite(ctx, sprite, -spriteSize / 2, -spriteSize / 2, spriteSize, spriteSize);
+  drawWeaponSwingSprite(ctx, weaponSwing.weaponId, sprite, centerX, centerY, swingAngle, spriteSize);
   ctx.restore();
 }
 
@@ -4571,6 +4719,7 @@ canvas.addEventListener(
 let spritesReady = false;
 
 loadAssetSprites()
+  .then(() => loadWeaponSprites())
   .then(() => loadGolemSprites())
   .then(() => {
     spritesReady = true;

@@ -1,3 +1,8 @@
+:root {
+  --font-ui: "VT323", monospace;
+  --font-display: "Press Start 2P", cursive;
+}
+
 html,
 body,
 #app {
@@ -9,7 +14,9 @@ body,
 
 body {
   background: #111;
-  font-family: "Segoe UI", Arial, sans-serif;
+  font-family: var(--font-ui);
+  font-size: 20px;
+  letter-spacing: 0.02em;
 }
 
 #app {
@@ -186,9 +193,10 @@ canvas {
 }
 
 .hud-btn {
+  font-family: var(--font-ui);
   padding: 0.35rem 0.75rem;
-  font-size: 12px;
-  font-weight: bold;
+  font-size: 1.1rem;
+  font-weight: normal;
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: #000;
@@ -398,9 +406,11 @@ canvas {
   min-width: 220px;
   margin: 0;
   padding: 0.85rem 2.4rem;
-  font-size: 1.05rem;
-  font-weight: bold;
-  letter-spacing: 0.12em;
+  font-family: var(--font-display);
+  font-size: 0.68rem;
+  font-weight: normal;
+  line-height: 1.5;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   border: 2px solid transparent;
   border-radius: 4px;

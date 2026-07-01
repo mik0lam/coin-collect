@@ -1,4 +1,5 @@
 import "./style.css";
+import { fontDisplay, fontUi } from "./fonts";
 import titleLogoUrl from "../newsprites/titlelog.png";
 import { SPRITES, drawSprite, drawSpriteCentered, drawTintedSprite, getWeaponSprite, drawWeaponSwingSprite, FLOOR_TILES } from "./sprites";
 import { loadAssetSprites, getHeroHitbox, HERO_DRAW_SIZE, TILE_DRAW_SIZE, TILE_SCALE } from "./spriteAssets";
@@ -20,7 +21,6 @@ import {
 import { clampDeltaMs, deltaScale, TARGET_FRAME_MS } from "./timing";
 import {
   getLegendaryWeaponPool,
-  getOneStarWeaponPool,
   resetLegendaryPool,
   unlockGolemClubLegendary,
 } from "./legendaryPool";
@@ -74,6 +74,7 @@ import {
   VOID_SHARD_SIZE,
   WEAPON_PICKUP_SIZE,
   WEAPONS,
+  UNARMED_ATTACK,
   formatWeaponName,
   getWeaponDisplayColor,
 } from "./constants";
@@ -381,16 +382,34 @@ const DEBUG_ITEM_CATALOG: DebugGrantEntry[] = [
 ];
 
 const ITEM_DEBUG_UI = {
-  panelX: 80,
-  panelY: 28,
-  panelWidth: 640,
-  panelHeight: 360,
-  slotSize: 72,
-  slotGap: 10,
-  gridX: 108,
-  gridY: 88,
-  cols: 4,
+  cols: 5,
+  slotGap: 8,
+  headerHeight: 72,
+  footerHeight: 28,
+  sidePadding: 20,
+  maxSlotSize: 64,
+  minSlotSize: 52,
 };
+
+function getItemDebugLayout() {
+  const itemCount = DEBUG_ITEM_CATALOG.length;
+  const cols = ITEM_DEBUG_UI.cols;
+  const rows = Math.ceil(itemCount / cols);
+  const { slotGap, headerHeight, footerHeight, sidePadding, maxSlotSize, minSlotSize } = ITEM_DEBUG_UI;
+  const maxGridHeight = PLAY_HEIGHT - 24 - headerHeight - footerHeight;
+  const slotSizeFromHeight = Math.floor((maxGridHeight - (rows - 1) * slotGap) / rows);
+  const slotSize = Math.max(minSlotSize, Math.min(maxSlotSize, slotSizeFromHeight));
+  const gridWidth = cols * slotSize + (cols - 1) * slotGap;
+  const gridHeight = rows * slotSize + (rows - 1) * slotGap;
+  const panelWidth = gridWidth + sidePadding * 2;
+  const panelHeight = headerHeight + gridHeight + footerHeight;
+  const panelX = (PLAY_WIDTH - panelWidth) / 2;
+  const panelY = Math.max(8, (PLAY_HEIGHT - panelHeight) / 2);
+  const gridX = panelX + (panelWidth - gridWidth) / 2;
+  const gridY = panelY + headerHeight;
+
+  return { panelX, panelY, panelWidth, panelHeight, cols, slotSize, slotGap, gridX, gridY };
+}
 
 let runSeed = 0;
 let currentDepth = 1;
@@ -1234,14 +1253,15 @@ function toggleItemDebugMenu(open?: boolean) {
 }
 
 function getItemDebugSlotRect(index: number) {
-  const col = index % ITEM_DEBUG_UI.cols;
-  const row = Math.floor(index / ITEM_DEBUG_UI.cols);
+  const { cols, slotSize, slotGap, gridX, gridY } = getItemDebugLayout();
+  const col = index % cols;
+  const row = Math.floor(index / cols);
 
   return {
-    x: ITEM_DEBUG_UI.gridX + col * (ITEM_DEBUG_UI.slotSize + ITEM_DEBUG_UI.slotGap),
-    y: ITEM_DEBUG_UI.gridY + row * (ITEM_DEBUG_UI.slotSize + ITEM_DEBUG_UI.slotGap),
-    w: ITEM_DEBUG_UI.slotSize,
-    h: ITEM_DEBUG_UI.slotSize,
+    x: gridX + col * (slotSize + slotGap),
+    y: gridY + row * (slotSize + slotGap),
+    w: slotSize,
+    h: slotSize,
   };
 }
 
@@ -1749,6 +1769,10 @@ function getEquippedWeaponDef(): WeaponDef {
   return WEAPONS[getActiveWeaponItem()!.weaponId!];
 }
 
+function getAttackDef(): WeaponDef {
+  return hasUsableWeapon() ? getEquippedWeaponDef() : UNARMED_ATTACK;
+}
+
 function selectWeaponSlot(slot: number) {
   const item = inventory[slot];
 
@@ -2050,7 +2074,7 @@ function resetGame() {
 }
 
 function getSwingHitbox() {
-  const def = getEquippedWeaponDef();
+  const def = getAttackDef();
   const centerX = player.x + player.size / 2;
   const centerY = player.y + player.size / 2;
 
@@ -2146,11 +2170,14 @@ function slayMob(mob: RuntimeMob) {
 }
 
 function applyWeaponHitToMob(mob: RuntimeMob) {
-  const activeItem = getActiveWeaponItem()!;
-  const weaponId = activeItem.weaponId!;
-  const def = WEAPONS[weaponId];
-  const baseDamage = getPlayerWeaponDamage(weaponId, def.damage);
-  const damage = getEffectiveDamage(weaponId, baseDamage, mob, debugInstakill);
+  const def = getAttackDef();
+  const weaponId = getActiveWeaponItem()?.weaponId ?? null;
+  const baseDamage = weaponId ? getPlayerWeaponDamage(weaponId, def.damage) : def.damage;
+  const damage = weaponId
+    ? getEffectiveDamage(weaponId, baseDamage, mob, debugInstakill)
+    : debugInstakill
+      ? mob.hp
+      : def.damage;
 
   damageMob(mob, damage);
   applyKnockback(mob, def.knockback);
@@ -2227,12 +2254,8 @@ function applyKnockback(mob: RuntimeMob, knockback: number) {
 }
 
 function tryAttack() {
-  if (!hasUsableWeapon()) {
-    return;
-  }
-
-  const def = getEquippedWeaponDef();
-  const activeItem = getActiveWeaponItem()!;
+  const armed = hasUsableWeapon();
+  const def = getAttackDef();
   const now = performance.now();
 
   if (now < weaponSwing.lastAttackAt + def.cooldownMs) {
@@ -2244,27 +2267,31 @@ function tryAttack() {
   weaponSwing.swingColor = def.swingColor;
   weaponSwing.durationMs = def.durationMs;
   weaponSwing.range = def.range;
-  weaponSwing.weaponId = activeItem.weaponId!;
+  weaponSwing.weaponId = armed ? getActiveWeaponItem()!.weaponId! : null;
   weaponSwing.swingArcScale = def.swingArcScale;
   weaponSwing.swingSpriteSize = def.swingSpriteSize;
-  const weaponId = activeItem.weaponId!;
   checkWeaponMobHits();
 
-  if (shouldFireGolemBeam(weaponId)) {
-    fireGolemClubBeam(weaponId);
-  }
+  if (armed) {
+    const weaponId = getActiveWeaponItem()!.weaponId!;
+    if (shouldFireGolemBeam(weaponId)) {
+      fireGolemClubBeam(weaponId);
+    }
 
-  if (shouldThrowSoulScythe(weaponId)) {
-    throwSoulScythes(weaponId);
-  }
+    if (shouldThrowSoulScythe(weaponId)) {
+      throwSoulScythes(weaponId);
+    }
 
-  const hitObstacle = checkWeaponObstacleHits();
+    const hitObstacle = checkWeaponObstacleHits();
 
-  if (
-    !shouldSkipDurabilityLoss(weaponId) &&
-    (weaponSwing.lastMobDamagedSwing === weaponSwing.lastAttackAt || hitObstacle)
-  ) {
-    consumeWeaponDurability(1);
+    if (
+      !shouldSkipDurabilityLoss(weaponId) &&
+      (weaponSwing.lastMobDamagedSwing === weaponSwing.lastAttackAt || hitObstacle)
+    ) {
+      consumeWeaponDurability(1);
+    }
+  } else {
+    checkWeaponObstacleHits();
   }
 }
 
@@ -2302,7 +2329,7 @@ function obstacleStrikeBox(obstacle: LayoutObstacle) {
 }
 
 function checkWeaponMobHits() {
-  if (!hasUsableWeapon()) {
+  if (performance.now() >= weaponSwing.activeUntil) {
     return;
   }
 
@@ -2310,8 +2337,7 @@ function checkWeaponMobHits() {
     return;
   }
 
-  const activeItem = getActiveWeaponItem()!;
-  const weaponId = activeItem.weaponId!;
+  const weaponId = getActiveWeaponItem()?.weaponId ?? null;
   const hitbox = getSwingHitbox();
   let primaryMob: RuntimeMob | null = null;
 
@@ -2346,7 +2372,7 @@ function checkWeaponMobHits() {
   weaponSwing.lastMobDamagedSwing = weaponSwing.lastAttackAt;
   applyWeaponHitToMob(primaryMob);
 
-  if (!shouldChainStrike(weaponId)) {
+  if (!weaponId || !shouldChainStrike(weaponId)) {
     return;
   }
 
@@ -2372,7 +2398,7 @@ function checkWeaponMobHits() {
 }
 
 function checkWeaponObstacleHits() {
-  if (!hasUsableWeapon()) {
+  if (performance.now() >= weaponSwing.activeUntil) {
     return false;
   }
 
@@ -2380,7 +2406,7 @@ function checkWeaponObstacleHits() {
     return false;
   }
 
-  const def = getEquippedWeaponDef();
+  const def = getAttackDef();
   const hitbox = getSwingHitbox();
   const room = getCurrentRoom();
   let hitAny = false;
@@ -3122,7 +3148,7 @@ function moveMobs(dt: number) {
 }
 
 function updateWeapon() {
-  if (performance.now() < weaponSwing.activeUntil && hasUsableWeapon()) {
+  if (performance.now() < weaponSwing.activeUntil) {
     checkWeaponMobHits();
     checkWeaponObstacleHits();
   }
@@ -3570,13 +3596,6 @@ function tryOpenChest() {
     y: room.chest.y + CHEST_SIZE,
   };
 
-  if (room.chest.variant === "slot") {
-    const oneStarPool = getOneStarWeaponPool();
-    const weaponId = oneStarPool[Math.floor(Math.random() * oneStarPool.length)];
-    collectChestLoot({ kind: "weapon", weaponId }, dropNear);
-    return;
-  }
-
   collectChestLoot(room.chest.loot, dropNear);
 }
 
@@ -3670,9 +3689,11 @@ function updateHtmlHud() {
     hudWeaponNameEl.classList.toggle("hud-weapon-ready", cooldownReady);
     hudWeaponNameEl.classList.toggle("hud-weapon-cooldown", !cooldownReady);
   } else {
-    hudWeaponNameEl.textContent = "No weapon";
+    const cooldownReady = performance.now() >= weaponSwing.lastAttackAt + UNARMED_ATTACK.cooldownMs;
+    hudWeaponNameEl.textContent = cooldownReady ? UNARMED_ATTACK.name : "Cooling down…";
     hudDurFillEl.style.width = "0%";
-    hudWeaponNameEl.classList.remove("hud-weapon-ready", "hud-weapon-cooldown");
+    hudWeaponNameEl.classList.toggle("hud-weapon-ready", cooldownReady);
+    hudWeaponNameEl.classList.toggle("hud-weapon-cooldown", !cooldownReady);
   }
 }
 
@@ -3752,15 +3773,15 @@ function drawMapOverlay() {
   ctx.strokeRect(panelX + 5, panelY + 5, panelW - 10, panelH - 10);
 
   ctx.fillStyle = "#e8d8c0";
-  ctx.font = "bold 18px Arial";
+  ctx.font = fontUi(18, true);
   ctx.textAlign = "center";
   ctx.fillText(`MAP — DEPTH ${currentDepth}`, panelX + panelW / 2, panelY + panelPad + 20);
 
-  ctx.font = "11px Arial";
+  ctx.font = fontUi(11);
   ctx.fillStyle = "#9a8878";
   ctx.fillText("Explored rooms only", panelX + panelW / 2, panelY + panelPad + 38);
 
-  ctx.font = "10px Arial";
+  ctx.font = fontUi(10);
   ctx.fillStyle = "#7a6a5a";
   ctx.fillText(
     "● you   ▼ stairs down   ▲ stairs up",
@@ -3823,17 +3844,17 @@ function drawMapOverlay() {
 
     if (room.stairsDownTile && room.stairsUpTile) {
       ctx.fillStyle = "#d8a0a0";
-      ctx.font = "bold 10px Arial";
+      ctx.font = fontUi(10, true);
       ctx.textAlign = "center";
       ctx.fillText("▲▼", x + cellSize / 2, y + cellSize / 2 + 3);
     } else if (room.stairsDownTile) {
       ctx.fillStyle = "#d87878";
-      ctx.font = "bold 11px Arial";
+      ctx.font = fontUi(11, true);
       ctx.textAlign = "center";
       ctx.fillText("▼", x + cellSize / 2, y + cellSize / 2 + 4);
     } else if (room.stairsUpTile) {
       ctx.fillStyle = "#88b8d8";
-      ctx.font = "bold 11px Arial";
+      ctx.font = fontUi(11, true);
       ctx.textAlign = "center";
       ctx.fillText("▲", x + cellSize / 2, y + cellSize / 2 + 4);
     }
@@ -3850,11 +3871,11 @@ function drawMapOverlay() {
 
   ctx.textAlign = "left";
   ctx.fillStyle = "#c8b8a8";
-  ctx.font = "bold 11px Arial";
+  ctx.font = fontUi(11, true);
   ctx.fillText("FLOORS", depthListX, depthListY);
   depthListY += 16;
 
-  ctx.font = "11px Arial";
+  ctx.font = fontUi(11);
 
   for (const depth of exploredDepths) {
     const isCurrentDepth = depth === currentDepth;
@@ -3870,7 +3891,7 @@ function drawMapOverlay() {
 
   ctx.textAlign = "center";
   ctx.fillStyle = "#7a6a5a";
-  ctx.font = "11px Arial";
+  ctx.font = fontUi(11);
   ctx.fillText("M or Map to close", panelX + panelW / 2, panelY + panelH - panelPad - 6);
   ctx.textAlign = "left";
 }
@@ -3980,7 +4001,7 @@ function drawStairsTiles(room: Room) {
     drawSprite(ctx, sprite, tile.x, tile.y + pulse, w, h);
 
     ctx.fillStyle = "#e8c8ff";
-    ctx.font = "bold 11px Arial";
+    ctx.font = fontUi(11, true);
     ctx.textAlign = "center";
     ctx.fillText("▼ Ladder Down", tile.x + w / 2, tile.y + h + 12 + pulse);
     ctx.textAlign = "left";
@@ -3995,7 +4016,7 @@ function drawStairsTiles(room: Room) {
     drawSprite(ctx, sprite, tile.x, tile.y + pulse, w, h);
 
     ctx.fillStyle = "#b8e8ff";
-    ctx.font = "bold 11px Arial";
+    ctx.font = fontUi(11, true);
     ctx.textAlign = "center";
     ctx.fillText("▲ Ladder Up", tile.x + w / 2, tile.y + h + 12 + pulse);
     ctx.textAlign = "left";
@@ -4191,8 +4212,7 @@ function drawChest() {
   const sprite = room.chest.opened ? SPRITES.chestOpen : SPRITES.chestClosed;
 
   if (!room.chest.opened) {
-    const isSlotChest = room.chest.variant === "slot";
-    ctx.fillStyle = isSlotChest ? "rgba(180, 80, 255, 0.28)" : "rgba(255, 215, 0, 0.15)";
+    ctx.fillStyle = "rgba(255, 215, 0, 0.15)";
     ctx.beginPath();
     ctx.arc(
       screenX + CHEST_SIZE / 2,
@@ -4204,11 +4224,7 @@ function drawChest() {
     ctx.fill();
   }
 
-  if (room.chest.variant === "slot" && !room.chest.opened) {
-    drawTintedSprite(ctx, sprite, screenX, screenY + pulse, CHEST_SIZE, "#c070ff", 0.45);
-  } else {
-    drawSprite(ctx, sprite, screenX, screenY + pulse, CHEST_SIZE, CHEST_SIZE);
-  }
+  drawSprite(ctx, sprite, screenX, screenY + pulse, CHEST_SIZE, CHEST_SIZE);
 }
 
 function drawVoidShardPickup() {
@@ -4271,7 +4287,7 @@ function drawScrapPickups() {
     ctx.fillRect(pickup.x + 9, pickup.y + 11 + pulse, SCRAP_PICKUP_SIZE - 18, 4);
 
     ctx.fillStyle = "#e8ecf4";
-    ctx.font = "bold 10px Arial";
+    ctx.font = fontUi(10, true);
     ctx.textAlign = "center";
     ctx.fillText(String(pickup.amount), pickup.x + SCRAP_PICKUP_SIZE / 2, pickup.y + SCRAP_PICKUP_SIZE + 10);
     ctx.textAlign = "left";
@@ -4305,7 +4321,7 @@ function drawBossHeartPickup() {
   ctx.fill();
 
   ctx.fillStyle = "#ffd0d8";
-  ctx.font = "bold 10px Arial";
+  ctx.font = fontUi(10, true);
   ctx.textAlign = "center";
   ctx.fillText("♥ +Max HP", heart.x + BOSS_HEART_SIZE / 2, heart.y - 6 + pulse);
   ctx.textAlign = "left";
@@ -4345,7 +4361,7 @@ function drawShopStation() {
 
   if (isNearShopStation(room, getPlayerCollisionBox())) {
     ctx.fillStyle = "#b8f0c8";
-    ctx.font = "bold 11px Arial";
+    ctx.font = fontUi(11, true);
     ctx.textAlign = "center";
     ctx.fillText("E — Shop & Craft", screenX + SHOP_STATION_SIZE / 2, screenY - 8 + pulse);
     ctx.textAlign = "left";
@@ -4386,7 +4402,7 @@ function drawSlotMachine() {
 
   if (isNearSlotMachine() && slotSpin.activeUntil <= performance.now()) {
     ctx.fillStyle = voidShards > 0 ? "#e8c8ff" : "#9a8878";
-    ctx.font = "bold 11px Arial";
+    ctx.font = fontUi(11, true);
     ctx.textAlign = "center";
     ctx.fillText(
       voidShards > 0 ? "E — Spin (1 shard)" : "E — Need shard",
@@ -4425,7 +4441,7 @@ function drawSlotSpinOverlay() {
   ctx.strokeRect(panelX + 1.5, panelY + 1.5, panelW - 3, panelH - 3);
 
   ctx.fillStyle = "#e8d8c0";
-  ctx.font = "bold 18px Arial";
+  ctx.font = fontUi(18, true);
   ctx.textAlign = "center";
   ctx.fillText("LEGENDARY SLOT", panelX + panelW / 2, panelY + 28);
 
@@ -4459,7 +4475,7 @@ function drawSlotSpinOverlay() {
 
   if (progress > 0.9 && slotSpin.resultWeaponId) {
     ctx.fillStyle = "#ffd860";
-    ctx.font = "bold 14px Arial";
+    ctx.font = fontUi(14, true);
     ctx.fillText(
       WEAPONS[slotSpin.resultWeaponId].name,
       panelX + panelW / 2,
@@ -4521,43 +4537,43 @@ function drawInventoryItem(
   if (item.type === "health-potion") {
     drawSprite(ctx, SPRITES.potionHealth, iconX, iconY + 2, iconSize, iconSize);
     ctx.fillStyle = "#ddd";
-    ctx.font = `${labelSize}px Arial`;
+    ctx.font = fontUi(labelSize);
     ctx.textAlign = "center";
     ctx.fillText(`+${item.healAmount ?? 0} HP`, centerX, slotY + slotSize - 6);
     ctx.fillStyle = "#777";
-    ctx.font = `${labelSize - 1}px Arial`;
+    ctx.font = fontUi(labelSize - 1);
     ctx.fillText("Press 1", centerX, slotY + slotSize - 16);
   } else if (item.type === "strong-potion") {
     drawSprite(ctx, SPRITES.potionStrong, iconX, iconY + 2, iconSize, iconSize);
     ctx.fillStyle = "#ddd";
-    ctx.font = `${labelSize}px Arial`;
+    ctx.font = fontUi(labelSize);
     ctx.textAlign = "center";
     ctx.fillText(`+${item.healAmount ?? 0} HP`, centerX, slotY + slotSize - 6);
     ctx.fillStyle = "#777";
-    ctx.font = `${labelSize - 1}px Arial`;
+    ctx.font = fontUi(labelSize - 1);
     ctx.fillText("Press 2", centerX, slotY + slotSize - 16);
   } else if (item.type === "weapon" && item.weaponId) {
     drawSprite(ctx, getWeaponSprite(item.weaponId), iconX, iconY, iconSize, iconSize);
     const dur = getWeaponDurability(item);
     const maxDur = getWeaponMaxDurability(item);
     ctx.fillStyle = getWeaponDisplayColor(item.weaponId);
-    ctx.font = `${titleSize}px Arial`;
+    ctx.font = fontUi(titleSize);
     ctx.textAlign = "center";
     const title = formatEnchantLabel(item) || formatWeaponName(item.weaponId);
     ctx.fillText(title.length > 14 ? `${title.slice(0, 13)}…` : title, centerX, slotY + slotSize - 18);
     ctx.fillStyle = dur > maxDur * 0.25 ? "#ccc" : "#f88";
-    ctx.font = `${labelSize}px Arial`;
+    ctx.font = fontUi(labelSize);
     ctx.fillText(`${dur}/${maxDur}`, centerX, slotY + slotSize - 6);
   } else if (item.type === "special" && item.specialId) {
     drawSprite(ctx, SPRITES.dashBoots, iconX, iconY, iconSize, iconSize);
     const def = SPECIAL_ITEMS[item.specialId];
     ctx.fillStyle = "#88ddff";
-    ctx.font = `${titleSize}px Arial`;
+    ctx.font = fontUi(titleSize);
     ctx.textAlign = "center";
     const name = def.name.length > 14 ? `${def.name.slice(0, 13)}…` : def.name;
     ctx.fillText(name, centerX, slotY + slotSize - 18);
     ctx.fillStyle = "#888";
-    ctx.font = `${labelSize - 1}px Arial`;
+    ctx.font = fontUi(labelSize - 1);
     ctx.fillText("Accessory", centerX, slotY + slotSize - 6);
   }
 
@@ -4586,11 +4602,11 @@ function drawInventoryOverlay() {
   ctx.strokeRect(panelX, panelY, panelWidth, panelHeight);
 
   ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 20px Arial";
+  ctx.font = fontUi(20, true);
   ctx.textAlign = "center";
   ctx.fillText("Inventory", panelX + panelWidth / 2, panelY + 24);
 
-  ctx.font = "12px Arial";
+  ctx.font = fontUi(12);
   ctx.fillStyle = "#aaa";
   ctx.fillText(
     `${countInventoryItems()}/${inventorySlotCount} bag · drag accessories into equipped slots`,
@@ -4599,7 +4615,7 @@ function drawInventoryOverlay() {
   );
 
   ctx.fillStyle = "#c8a0ff";
-  ctx.font = "bold 12px Arial";
+  ctx.font = fontUi(12, true);
   ctx.fillText("Equipped", panelX + panelWidth / 2, layout.accLabelY);
 
   for (let i = 0; i < ACCESSORY_SLOT_COUNT; i++) {
@@ -4618,7 +4634,7 @@ function drawInventoryOverlay() {
 
     if (!item) {
       ctx.fillStyle = "#556";
-      ctx.font = "10px Arial";
+      ctx.font = fontUi(10);
       ctx.textAlign = "center";
       ctx.fillText("Empty", slotX + slotSize / 2, slotY + slotSize / 2 + 3);
       ctx.textAlign = "left";
@@ -4631,7 +4647,7 @@ function drawInventoryOverlay() {
   }
 
   ctx.fillStyle = "#888";
-  ctx.font = "bold 12px Arial";
+  ctx.font = fontUi(12, true);
   ctx.textAlign = "center";
   ctx.fillText("Bag", panelX + panelWidth / 2, layout.bagLabelY);
 
@@ -4651,20 +4667,20 @@ function drawInventoryOverlay() {
     ctx.strokeRect(slotX, slotY, slotSize, slotSize);
 
     ctx.fillStyle = "#777";
-    ctx.font = "9px Arial";
+    ctx.font = fontUi(9);
     ctx.textAlign = "left";
     ctx.fillText(`${i + 3}`, slotX + 4, slotY + 11);
 
     if (isActiveWeapon) {
       ctx.fillStyle = "#ffaa44";
-      ctx.font = "bold 8px Arial";
+      ctx.font = fontUi(8, true);
       ctx.textAlign = "right";
       ctx.fillText("ACTIVE", slotX + slotSize - 4, slotY + 11);
     }
 
     if (!item) {
       ctx.fillStyle = "#555";
-      ctx.font = "10px Arial";
+      ctx.font = fontUi(10);
       ctx.textAlign = "center";
       ctx.fillText("Empty", slotX + slotSize / 2, slotY + slotSize / 2 + 3);
       ctx.textAlign = "left";
@@ -4696,7 +4712,7 @@ function drawInventoryOverlay() {
 
   ctx.textAlign = "center";
   ctx.fillStyle = "#777";
-  ctx.font = "11px Arial";
+  ctx.font = fontUi(11);
   ctx.fillText("I close · Del discard · click weapon to equip", panelX + panelWidth / 2, layout.footerY);
   ctx.textAlign = "left";
 }
@@ -4722,11 +4738,11 @@ function drawEnchantOverlay() {
   ctx.strokeRect(panelX, panelY, panelW, panelH);
 
   ctx.fillStyle = "#e8d0ff";
-  ctx.font = "bold 22px Arial";
+  ctx.font = fontDisplay(14);
   ctx.textAlign = "center";
   ctx.fillText("Secret Enchant Chamber", panelX + panelW / 2, panelY + 36);
 
-  ctx.font = "14px Arial";
+  ctx.font = fontUi(14);
   ctx.fillStyle = "#bba0dd";
   ctx.fillText("Click a weapon to imbue it with a random buff", panelX + panelW / 2, panelY + 62);
   ctx.fillText("You will be teleported out after enchanting", panelX + panelW / 2, panelY + 82);
@@ -4752,7 +4768,7 @@ function drawEnchantOverlay() {
       drawInventoryItem(item, slotX, slotY, slotSize);
     } else if (!item) {
       ctx.fillStyle = "#555";
-      ctx.font = "11px Arial";
+      ctx.font = fontUi(11);
       ctx.textAlign = "center";
       ctx.fillText("Empty", slotX + slotSize / 2, slotY + slotSize / 2 + 4);
     }
@@ -4968,7 +4984,7 @@ function drawFloorMessage() {
   const margin = 12;
   const maxWidth = PLAY_WIDTH - margin * 2;
 
-  ctx.font = "bold 16px Arial";
+  ctx.font = fontUi(16, true);
   const textWidth = Math.min(maxWidth - paddingX * 2, ctx.measureText(floorMessage).width);
   const bannerWidth = Math.ceil(textWidth + paddingX * 2);
   const bannerX = margin;
@@ -5035,7 +5051,7 @@ function drawObstacles(room: Room) {
 function drawWeaponSwing() {
   const now = performance.now();
 
-  if (now >= weaponSwing.activeUntil || !weaponSwing.weaponId) {
+  if (now >= weaponSwing.activeUntil) {
     return;
   }
 
@@ -5049,8 +5065,6 @@ function drawWeaponSwing() {
   const arcEnd = start + (end - start) * progress;
   const radius = weaponSwing.range * 0.92;
   const swingAngle = arcStart + (arcEnd - arcStart) * progress;
-  const sprite = getWeaponSprite(weaponSwing.weaponId);
-  const spriteSize = weaponSwing.swingSpriteSize;
   const trailWidth = weaponSwing.weaponId === "war-axe" ? 6 : weaponSwing.weaponId === "dagger" ? 2.5 : 4;
 
   ctx.save();
@@ -5061,18 +5075,23 @@ function drawWeaponSwing() {
   ctx.moveTo(centerX, centerY);
   ctx.arc(centerX, centerY, radius, arcStart, arcEnd);
   ctx.closePath();
-  ctx.globalAlpha = weaponSwing.weaponId === "dagger" ? 0.18 : 0.26;
+  ctx.globalAlpha = weaponSwing.weaponId === "dagger" ? 0.18 : weaponSwing.weaponId ? 0.26 : 0.22;
   ctx.fill();
 
-  ctx.globalAlpha = 0.7;
-  ctx.lineWidth = trailWidth;
+  ctx.globalAlpha = weaponSwing.weaponId ? 0.7 : 0.55;
+  ctx.lineWidth = weaponSwing.weaponId ? trailWidth : 3;
   ctx.lineCap = "round";
   ctx.beginPath();
   ctx.arc(centerX, centerY, radius, arcStart, arcEnd);
   ctx.stroke();
 
-  ctx.globalAlpha = 1;
-  drawWeaponSwingSprite(ctx, weaponSwing.weaponId, sprite, centerX, centerY, swingAngle, spriteSize);
+  if (weaponSwing.weaponId) {
+    const sprite = getWeaponSprite(weaponSwing.weaponId);
+    const spriteSize = weaponSwing.swingSpriteSize;
+    ctx.globalAlpha = 1;
+    drawWeaponSwingSprite(ctx, weaponSwing.weaponId, sprite, centerX, centerY, swingAngle, spriteSize);
+  }
+
   ctx.restore();
 }
 
@@ -5097,11 +5116,11 @@ function drawShopOverlay() {
   ctx.strokeRect(panelX + 1, panelY + 1, panelW - 2, panelH - 2);
 
   ctx.fillStyle = "#d8f0dc";
-  ctx.font = "bold 20px Arial";
+  ctx.font = fontUi(20, true);
   ctx.textAlign = "center";
   ctx.fillText("Coin Shop & Forge", panelX + panelW / 2, panelY + 32);
 
-  ctx.font = "14px Arial";
+  ctx.font = fontUi(14);
   ctx.fillStyle = "#b8d8bc";
   ctx.fillText(`Coins: ${score} · Scrap: ${scrap} · Armor: ${getArmorLabel(armorTier)}`, panelX + panelW / 2, panelY + 56);
 
@@ -5155,7 +5174,7 @@ function drawEncyclopediaOverlay() {
   ctx.strokeRect(panelX + 1, panelY + 1, panelW - 2, panelH - 2);
 
   ctx.fillStyle = "#f0e6c8";
-  ctx.font = "bold 20px Arial";
+  ctx.font = fontUi(20, true);
   ctx.textAlign = "center";
   ctx.fillText("Encyclopedia", panelX + panelW / 2, panelY + 32);
 
@@ -5169,13 +5188,13 @@ function drawEncyclopediaOverlay() {
   ctx.strokeStyle = encyclopediaTab === "accessories" ? "#c8a050" : "#666";
   ctx.strokeRect(tabX + tabW + 12, tabY, tabW, 28);
 
-  ctx.font = "13px Arial";
+  ctx.font = fontUi(13);
   ctx.fillStyle = encyclopediaTab === "weapons" ? "#f0e6c8" : "#9a9080";
   ctx.fillText("1 · Weapons", tabX + tabW / 2, tabY + 18);
   ctx.fillStyle = encyclopediaTab === "accessories" ? "#f0e6c8" : "#9a9080";
   ctx.fillText("2 · Accessories", tabX + tabW + 12 + tabW / 2, tabY + 18);
 
-  ctx.font = "12px Arial";
+  ctx.font = fontUi(12);
   ctx.fillStyle = "#c8b890";
   if (encyclopediaTab === "weapons") {
     ctx.fillText(
@@ -5216,9 +5235,9 @@ function drawEncyclopediaOverlay() {
 
         ctx.textAlign = "left";
         ctx.fillStyle = def.stars ? "#a8e0ff" : def.rarity === "legendary" ? "#e8c8ff" : "#e8e0d0";
-        ctx.font = "bold 15px Arial";
+        ctx.font = fontUi(15, true);
         ctx.fillText(formatWeaponName(weaponId), panelX + 80, y + 28);
-        ctx.font = "12px Arial";
+        ctx.font = fontUi(12);
         ctx.fillStyle = "#b8a890";
         ctx.fillText(
           `${def.damage} dmg · ${def.maxDurability} dur · ${def.cooldownMs}ms cd`,
@@ -5232,9 +5251,9 @@ function drawEncyclopediaOverlay() {
         ctx.fillRect(panelX + 24, y + 12, 44, 44);
         ctx.textAlign = "left";
         ctx.fillStyle = "#6a6470";
-        ctx.font = "bold 15px Arial";
+        ctx.font = fontUi(15, true);
         ctx.fillText("???", panelX + 80, y + 36);
-        ctx.font = "12px Arial";
+        ctx.font = fontUi(12);
         ctx.fillText("Not yet discovered", panelX + 80, y + 56);
       }
     }
@@ -5259,9 +5278,9 @@ function drawEncyclopediaOverlay() {
 
         ctx.textAlign = "left";
         ctx.fillStyle = "#a8e0ff";
-        ctx.font = "bold 15px Arial";
+        ctx.font = fontUi(15, true);
         ctx.fillText(def.name, panelX + 80, y + 26);
-        ctx.font = "12px Arial";
+        ctx.font = fontUi(12);
         ctx.fillStyle = "#b8a890";
         ctx.fillText(def.description, panelX + 80, y + 44);
         ctx.fillStyle = "#7ab8d8";
@@ -5271,9 +5290,9 @@ function drawEncyclopediaOverlay() {
         ctx.fillRect(panelX + 24, y + 10, 40, 40);
         ctx.textAlign = "left";
         ctx.fillStyle = "#6a6470";
-        ctx.font = "bold 15px Arial";
+        ctx.font = fontUi(15, true);
         ctx.fillText("???", panelX + 80, y + 34);
-        ctx.font = "12px Arial";
+        ctx.font = fontUi(12);
         ctx.fillText("Find in chests or the shop", panelX + 80, y + 52);
       }
     }
@@ -5282,7 +5301,7 @@ function drawEncyclopediaOverlay() {
   ctx.restore();
 
   ctx.fillStyle = "#9a9080";
-  ctx.font = "12px Arial";
+  ctx.font = fontUi(12);
   ctx.textAlign = "center";
   ctx.fillText(
     "1 / 2 tabs · K / Esc close · scroll wheel",
@@ -5299,25 +5318,25 @@ function drawDebugCatalogItem(entry: DebugGrantEntry, slotX: number, slotY: numb
   if (entry.kind === "weapon") {
     drawSprite(ctx, getWeaponSprite(entry.weaponId), slotX + 16, slotY + 16, iconSize, iconSize);
     ctx.fillStyle = getWeaponDisplayColor(entry.weaponId);
-    ctx.font = "9px Arial";
+    ctx.font = fontUi(9);
     ctx.textAlign = "center";
     ctx.fillText(formatWeaponName(entry.weaponId), centerX, slotY + slotSize - 8);
   } else if (entry.kind === "health-potion") {
     drawSprite(ctx, SPRITES.potionHealth, slotX + 16, slotY + 18, iconSize, iconSize);
     ctx.fillStyle = "#ddd";
-    ctx.font = "9px Arial";
+    ctx.font = fontUi(9);
     ctx.textAlign = "center";
     ctx.fillText(`HP +${entry.healAmount}`, centerX, slotY + slotSize - 8);
   } else if (entry.kind === "strong-potion") {
     drawSprite(ctx, SPRITES.potionStrong, slotX + 16, slotY + 18, iconSize, iconSize);
     ctx.fillStyle = "#ddd";
-    ctx.font = "9px Arial";
+    ctx.font = fontUi(9);
     ctx.textAlign = "center";
     ctx.fillText(`HP +${entry.healAmount}`, centerX, slotY + slotSize - 8);
   } else if (entry.kind === "special") {
     drawSprite(ctx, SPRITES.dashBoots, slotX + 16, slotY + 16, iconSize, iconSize);
     ctx.fillStyle = "#88ddff";
-    ctx.font = "9px Arial";
+    ctx.font = fontUi(9);
     ctx.textAlign = "center";
     ctx.fillText(SPECIAL_ITEMS[entry.specialId].name, centerX, slotY + slotSize - 8);
   }
@@ -5330,7 +5349,8 @@ function drawItemDebugOverlay() {
     return;
   }
 
-  const { panelX, panelY, panelWidth, panelHeight, slotSize } = ITEM_DEBUG_UI;
+  const layout = getItemDebugLayout();
+  const { panelX, panelY, panelWidth, panelHeight, slotSize } = layout;
 
   ctx.fillStyle = "rgba(0, 0, 0, 0.84)";
   ctx.fillRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
@@ -5342,11 +5362,11 @@ function drawItemDebugOverlay() {
   ctx.strokeRect(panelX + 1, panelY + 1, panelWidth - 2, panelHeight - 2);
 
   ctx.fillStyle = "#d8e8ff";
-  ctx.font = "bold 22px Arial";
+  ctx.font = fontDisplay(14);
   ctx.textAlign = "center";
   ctx.fillText("Item Debug Spawner", panelX + panelWidth / 2, panelY + 32);
 
-  ctx.font = "13px Arial";
+  ctx.font = fontUi(13);
   ctx.fillStyle = "#9ab0c8";
   ctx.fillText("Click an item to add it to your inventory", panelX + panelWidth / 2, panelY + 54);
 
@@ -5365,7 +5385,7 @@ function drawItemDebugOverlay() {
 
   ctx.textAlign = "center";
   ctx.fillStyle = "#888";
-  ctx.font = "13px Arial";
+  ctx.font = fontUi(13);
   ctx.fillText("F5 / Esc — Close", panelX + panelWidth / 2, panelY + panelHeight - 14);
   ctx.textAlign = "left";
 }
@@ -5390,7 +5410,7 @@ function drawDebugMenuOverlay() {
   ctx.strokeRect(panelX + 1, panelY + 1, panelW - 2, panelH - 2);
 
   ctx.fillStyle = "#d8e0ff";
-  ctx.font = "bold 20px Arial";
+  ctx.font = fontUi(20, true);
   ctx.textAlign = "center";
   ctx.fillText("Debug Menu (F4)", panelX + panelW / 2, panelY + 30);
 
@@ -5411,7 +5431,7 @@ function drawDebugMenuOverlay() {
   ];
 
   ctx.textAlign = "left";
-  ctx.font = "14px Arial";
+  ctx.font = fontUi(14);
   ctx.fillStyle = "#c8d0e8";
 
   for (let i = 0; i < lines.length; i++) {
@@ -5447,7 +5467,7 @@ function drawBossWeaponPickup() {
   );
 
   ctx.fillStyle = getWeaponDisplayColor(pickup.weaponId);
-  ctx.font = "bold 10px Arial";
+  ctx.font = fontUi(10, true);
   ctx.textAlign = "center";
   ctx.fillText(formatWeaponName(pickup.weaponId), pickup.x + size / 2, pickup.y - 6 + pulse);
   ctx.textAlign = "left";
@@ -5472,7 +5492,7 @@ function drawSpecialPickup() {
   drawSprite(ctx, SPRITES.dashBoots, pickup.x + 4, pickup.y + 4 + pulse, size - 8, size - 8);
 
   ctx.fillStyle = "#a8e8ff";
-  ctx.font = "bold 10px Arial";
+  ctx.font = fontUi(10, true);
   ctx.textAlign = "center";
   ctx.fillText(
     SPECIAL_ITEMS[pickup.specialId].name,
@@ -5539,11 +5559,11 @@ function drawStairsPrompt() {
   ctx.strokeRect(panelX + 1, panelY + 1, panelW - 2, panelH - 2);
 
   ctx.fillStyle = "#f0e8d0";
-  ctx.font = "bold 18px Arial";
+  ctx.font = fontUi(18, true);
   ctx.textAlign = "center";
   ctx.fillText(label, panelX + panelW / 2, panelY + 42);
 
-  ctx.font = "14px Arial";
+  ctx.font = fontUi(14);
   ctx.fillStyle = "#c8c0b0";
   ctx.fillText("Y / Enter — Yes     N / Esc — Stay", panelX + panelW / 2, panelY + 78);
   ctx.textAlign = "left";
@@ -5674,11 +5694,11 @@ function drawPauseOverlay() {
   ctx.fillRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
 
   ctx.fillStyle = "#f0e8d0";
-  ctx.font = "bold 34px Arial";
+  ctx.font = fontDisplay(20);
   ctx.textAlign = "center";
   ctx.fillText("Paused", PLAY_WIDTH / 2, PLAY_HEIGHT / 2 - 8);
 
-  ctx.font = "16px Arial";
+  ctx.font = fontUi(16);
   ctx.fillStyle = "#c8c0b0";
   ctx.fillText("Press Esc to resume", PLAY_WIDTH / 2, PLAY_HEIGHT / 2 + 28);
   ctx.textAlign = "left";

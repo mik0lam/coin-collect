@@ -6,7 +6,6 @@ import {
   BOSS_HEART_HP_BONUS,
   CHEST_SIZE,
   getNormalWeaponIds,
-  LEGENDARY_WEAPON_IDS,
   PLAY_HEIGHT,
   PLAY_WIDTH,
   POTION_PICKUP_SIZE,
@@ -17,7 +16,6 @@ import {
   VOID_SHARD_FLOOR_INTERVAL,
   VOID_SHARD_SIZE,
 } from "./constants";
-import { getOneStarWeaponPool } from "./legendaryPool";
 import { getRandomAccessoryId } from "./accessories";
 import { createRng } from "./rng";
 import { findLayoutPosition, findOpenPosition, isSnakeSpawnClear } from "./placement";
@@ -140,14 +138,6 @@ function generateChestLoot(depth: number, rng: () => number): ChestLoot {
     return { kind: "weapon", weaponId: normalPool[Math.floor(rng() * normalPool.length)] };
   }
 
-  if (roll < 0.5 && depth >= 4) {
-    const oneStarPool = getOneStarWeaponPool();
-    return {
-      kind: "weapon",
-      weaponId: oneStarPool[Math.floor(rng() * oneStarPool.length)],
-    };
-  }
-
   if (roll < 0.68 && depth >= 2) {
     return { kind: "special", specialId: getRandomAccessoryId(rng) };
   }
@@ -247,22 +237,6 @@ function placeVoidShardAndSlotMachine(
 
   startRoom.slotMachine = machinePos;
   startRoom.name = `Depth ${depth} · Shrine Floor`;
-
-  const chestPos = findOpenPosition(
-    rng,
-    CHEST_SIZE,
-    buildOccupied(startRoom),
-    startRoom.exits,
-    startRoom.obstacles,
-  );
-
-  startRoom.chest = {
-    x: chestPos.x,
-    y: chestPos.y,
-    opened: false,
-    variant: "slot",
-    loot: { kind: "weapon", weaponId: LEGENDARY_WEAPON_IDS[0] },
-  };
 }
 
 function placeShop(

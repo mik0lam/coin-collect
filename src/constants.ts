@@ -200,6 +200,20 @@ export function getNormalWeaponIds(): WeaponId[] {
   );
 }
 
+export const UNARMED_ATTACK: WeaponDef = {
+  damage: 1,
+  knockback: 8,
+  range: 30,
+  width: 34,
+  cooldownMs: 360,
+  durationMs: 130,
+  maxDurability: 0,
+  name: "Fists",
+  swingColor: "rgba(255, 210, 170, 0.7)",
+  swingArcScale: 0.62,
+  swingSpriteSize: 0,
+};
+
 export const MOB_COLORS: Record<MobType, { normal: string; hit: string }> = {
   snake: { normal: "lime", hit: "#88ff88" },
   slime: { normal: "#20b2aa", hit: "#66dddd" },

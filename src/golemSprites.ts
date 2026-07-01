@@ -5,7 +5,7 @@ import rockProjectileUrl from "./assets/sprites/mecha-golem/arm-projectile.png";
 
 export const GOLEM_FRAME_SIZE = 100;
 export const GOLEM_DRAW_SIZE = 192;
-export const GOLEM_HITBOX_SIZE = 176;
+export const GOLEM_HITBOX_SIZE = 132;
 export const GOLEM_SCALE = GOLEM_DRAW_SIZE / 96;
 export const GOLEM_COLS = 10;
 

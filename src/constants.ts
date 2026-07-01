@@ -146,6 +146,22 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     stars: 2,
     ability: "Soul Scythe — each swing throws a spinning blade (+3 dmg)",
   },
+  gungnir: {
+    damage: 9,
+    knockback: 40,
+    range: 64,
+    width: 20,
+    cooldownMs: 460,
+    durationMs: 130,
+    maxDurability: 110,
+    name: "Gungnir",
+    swingColor: "rgba(255, 120, 30, 0.95)",
+    swingArcScale: 0.3,
+    swingSpriteSize: 56,
+    attackStyle: "thrust",
+    stars: 3,
+    ability: "Ring of Fire — each thrust summons a ring of fire (+4 dmg)",
+  },
 };
 
 export function formatWeaponName(weaponId: WeaponId) {
@@ -166,6 +182,10 @@ export function getWeaponDisplayColor(weaponId: WeaponId) {
     return "#ffd860";
   }
 
+  if (def.stars && def.stars >= 3) {
+    return "#ffd080";
+  }
+
   if (def.stars && def.stars >= 2) {
     return "#88ccff";
   }
@@ -182,6 +202,11 @@ export const LEGENDARY_WEAPON_IDS: WeaponId[] = [
 
 export const BOSS_WEAPON_ID: WeaponId = "golem-club";
 export const EXECUTIONER_BOSS_WEAPON_ID: WeaponId = "executioner-scythe";
+export const IMPALER_BOSS_WEAPON_ID: WeaponId = "gungnir";
+
+export function isThrustWeapon(weaponId: WeaponId) {
+  return WEAPONS[weaponId].attackStyle === "thrust";
+}
 
 export const ALL_WEAPON_IDS = Object.keys(WEAPONS) as WeaponId[];
 
@@ -196,7 +221,11 @@ export function getOneStarWeaponIds(): WeaponId[] {
 
 export function getNormalWeaponIds(): WeaponId[] {
   return ALL_WEAPON_IDS.filter(
-    (id) => !isOneStarWeapon(id) && id !== BOSS_WEAPON_ID && id !== EXECUTIONER_BOSS_WEAPON_ID,
+    (id) =>
+      !isOneStarWeapon(id) &&
+      id !== BOSS_WEAPON_ID &&
+      id !== EXECUTIONER_BOSS_WEAPON_ID &&
+      id !== IMPALER_BOSS_WEAPON_ID,
   );
 }
 
@@ -282,8 +311,8 @@ export const ARMOR_TIERS: Record<
 };
 
 export const SHOP_ITEMS = {
-  healthPotion: { cost: 15, healAmount: 40, label: "Health Potion" },
-  strongPotion: { cost: 30, healAmount: 70, label: "Strong Potion" },
+  healthPotion: { cost: 15, healAmount: 35, label: "Health Potion" },
+  strongPotion: { cost: 30, healAmount: 58, label: "Strong Potion" },
   weaponRepair: { cost: 20, label: "Repair Weapon" },
 } as const;
 

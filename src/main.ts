@@ -5,6 +5,7 @@ import { SPRITES, drawSprite, drawSpriteCentered, drawTintedSprite, getWeaponSpr
 import { loadAssetSprites, getHeroHitbox, HERO_DRAW_SIZE, TILE_DRAW_SIZE, TILE_SCALE } from "./spriteAssets";
 import { loadGolemSprites, areGolemSpritesLoaded, getLaserFrame } from "./golemSprites";
 import { loadExecutionerSprites, areExecutionerSpritesLoaded } from "./executionerSprites";
+import { loadImpalerSprites, areImpalerSpritesLoaded } from "./impalerSprites";
 import { loadWeaponSprites } from "./weaponSprites";
 import { getBossAwakenMessage, getBossDefeatMessage, getBossKindForDepth, getBossWeaponDrop } from "./bossKind";
 import {
@@ -18,11 +19,22 @@ import {
   triggerExecutionerHurt,
   updateExecutionerBoss,
 } from "./executionerBoss";
+import {
+  clearImpalerEffects,
+  createImpalerBossState,
+  drawImpalerBoss,
+  isImpalerBossContactActive,
+  isImpalerDeathComplete,
+  startImpalerDeath,
+  triggerImpalerHurt,
+  updateImpalerBoss,
+} from "./impalerBoss";
 import { clampDeltaMs, deltaScale, TARGET_FRAME_MS } from "./timing";
 import {
   getLegendaryWeaponPool,
   resetLegendaryPool,
   unlockGolemClubLegendary,
+  unlockGungnirLegendary,
 } from "./legendaryPool";
 import {
   clearGolemEffects,
@@ -76,6 +88,7 @@ import {
   UNARMED_ATTACK,
   formatWeaponName,
   getWeaponDisplayColor,
+  isThrustWeapon,
 } from "./constants";
 import { boxesOverlap, collidesWithRoomObstacles, isSpawnBoxClear } from "./collision";
 import { generateFloor } from "./floorGeneration";
@@ -115,6 +128,8 @@ import {
   shouldSkipDurabilityLoss,
   shouldThrowSoulScythe,
   getSoulScytheDamage,
+  shouldCastGungnirFireRing,
+  getGungnirFireRingDamage,
 } from "./weaponAbilities";
 import {
   ACCESSORY_SLOT_COUNT,
@@ -480,6 +495,20 @@ interface SoulScytheProjectile {
 }
 
 const soulScytheProjectiles: SoulScytheProjectile[] = [];
+
+interface FireRing {
+  cx: number;
+  cy: number;
+  radius: number;
+  maxRadius: number;
+  expandSpeed: number;
+  thickness: number;
+  damage: number;
+  activeUntil: number;
+  hitMobIndices: Set<number>;
+}
+
+const fireRings: FireRing[] = [];
 
 const equippedAccessories: (InventoryItem | null)[] = Array.from(
   { length: ACCESSORY_SLOT_COUNT },
@@ -1669,8 +1698,10 @@ function applyRoomState(room: Room) {
   weaponSwing.weaponId = null;
   clearGolemEffects();
   clearExecutionerEffects();
+  clearImpalerEffects();
   playerGolemBeams.length = 0;
   soulScytheProjectiles.length = 0;
+  fireRings.length = 0;
 
   for (let i = 0; i < room.enemies.length; i++) {
     const config = room.enemies[i];
@@ -1691,12 +1722,18 @@ function applyRoomState(room: Room) {
       hitFlashUntil: 0,
       bossKind: config.bossKind,
       golemState:
-        config.type === "boss" && config.bossKind !== "executioner"
+        config.type === "boss" && config.bossKind === "golem"
           ? createGolemBossState()
           : undefined,
       executionerState:
         config.type === "boss" && config.bossKind === "executioner"
           ? createExecutionerBossState()
+          : undefined,
+      impalerState:
+        config.type === "boss" && config.bossKind === "impaler"
+          ? config.impalerState
+            ? { ...config.impalerState }
+            : createImpalerBossState()
           : undefined,
     });
   }
@@ -1715,6 +1752,11 @@ function saveMobsToRoom() {
     if (isMobAlive(mob)) {
       config.currentHp = mob.hp;
       config.segments = mob.segments.map((segment) => ({ ...segment }));
+
+      if (mob.impalerState) {
+        config.impalerState = { ...mob.impalerState };
+        config.size = mob.size;
+      }
     } else {
       config.currentHp = 0;
     }
@@ -2049,6 +2091,7 @@ function resetGame() {
   stairsPrompt = null;
   playerGolemBeams.length = 0;
   soulScytheProjectiles.length = 0;
+  fireRings.length = 0;
   lastUpdateTime = 0;
   playerKnockback.x = 0;
   playerKnockback.y = 0;
@@ -2150,6 +2193,10 @@ function slayMob(mob: RuntimeMob) {
       unlockGolemClubLegendary();
     }
 
+    if (bossKind === "impaler") {
+      unlockGungnirLegendary();
+    }
+
     spawnBossDownStairs(room);
     room.bossHeartPickup = { x: head.x - 24, y: head.y };
     room.bossWeaponPickup = {
@@ -2202,6 +2249,11 @@ function damageMob(mob: RuntimeMob, amount: number) {
       return;
     }
 
+    if (mob.type === "boss" && mob.impalerState && mob.impalerState.phase !== "dying") {
+      startImpalerDeath(mob.impalerState);
+      return;
+    }
+
     slayMob(mob);
     return;
   }
@@ -2212,6 +2264,10 @@ function damageMob(mob: RuntimeMob, amount: number) {
 
   if (mob.type === "boss" && mob.executionerState) {
     triggerExecutionerHurt(mob.executionerState);
+  }
+
+  if (mob.type === "boss" && mob.impalerState) {
+    triggerImpalerHurt(mob.impalerState);
   }
 }
 
@@ -2283,6 +2339,10 @@ function tryAttack() {
 
     if (shouldThrowSoulScythe(weaponId)) {
       throwSoulScythes(weaponId);
+    }
+
+    if (shouldCastGungnirFireRing(weaponId)) {
+      castGungnirFireRing(weaponId);
     }
 
     const hitObstacle = checkWeaponObstacleHits();
@@ -2719,6 +2779,102 @@ function throwSoulScythes(weaponId: WeaponId) {
   }
 }
 
+function castGungnirFireRing(weaponId: WeaponId) {
+  const cx = player.x + player.size / 2;
+  const cy = player.y + player.size / 2;
+  const now = performance.now();
+  const bonus = getGungnirFireRingDamage(weaponId, WEAPONS[weaponId].damage);
+  const damage = getPlayerWeaponDamage(weaponId, WEAPONS[weaponId].damage + bonus);
+
+  fireRings.push({
+    cx,
+    cy,
+    radius: 20,
+    maxRadius: 118,
+    expandSpeed: 3.2,
+    thickness: 24,
+    damage,
+    activeUntil: now + 720,
+    hitMobIndices: new Set(),
+  });
+}
+
+function updateFireRings(dt: number) {
+  const now = performance.now();
+
+  for (let i = fireRings.length - 1; i >= 0; i--) {
+    const ring = fireRings[i]!;
+
+    if (now >= ring.activeUntil) {
+      fireRings.splice(i, 1);
+      continue;
+    }
+
+    ring.radius += ring.expandSpeed * dt;
+
+    if (ring.radius > ring.maxRadius) {
+      fireRings.splice(i, 1);
+      continue;
+    }
+
+    for (let m = 0; m < activeMobs.length; m++) {
+      const mob = activeMobs[m]!;
+
+      if (!isMobAlive(mob) || ring.hitMobIndices.has(m)) {
+        continue;
+      }
+
+      const head = mob.segments[0];
+
+      if (!head) {
+        continue;
+      }
+
+      const mobCx = head.x + mob.size / 2;
+      const mobCy = head.y + mob.size / 2;
+      const dist = Math.hypot(mobCx - ring.cx, mobCy - ring.cy);
+
+      if (Math.abs(dist - ring.radius) <= ring.thickness * 0.55 + mob.size * 0.35) {
+        ring.hitMobIndices.add(m);
+        damageMob(mob, ring.damage);
+      }
+    }
+  }
+}
+
+function drawFireRings() {
+  const now = performance.now();
+
+  for (const ring of fireRings) {
+    if (now >= ring.activeUntil) {
+      continue;
+    }
+
+    const life = 1 - (now - (ring.activeUntil - 720)) / 720;
+
+    ctx.save();
+    ctx.translate(ring.cx, ring.cy);
+    ctx.globalAlpha = 0.22 + life * 0.28;
+    ctx.strokeStyle = "#ff6a18";
+    ctx.fillStyle = "rgba(255, 90, 20, 0.18)";
+    ctx.lineWidth = ring.thickness;
+    ctx.beginPath();
+    ctx.arc(0, 0, ring.radius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 0.12 + life * 0.16;
+    ctx.beginPath();
+    ctx.arc(0, 0, ring.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 0.45 + life * 0.35;
+    ctx.strokeStyle = "#ffd060";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, 0, ring.radius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
 function updateSoulScytheProjectiles(dt: number) {
   const now = performance.now();
 
@@ -3008,6 +3164,14 @@ function isPlayerHitByMobs() {
       continue;
     }
 
+    if (
+      mob.type === "boss" &&
+      mob.impalerState &&
+      !isImpalerBossContactActive(mob.impalerState)
+    ) {
+      continue;
+    }
+
     for (const segment of mob.segments) {
       if (
         boxesOverlap(
@@ -3049,7 +3213,7 @@ function moveMob(mob: RuntimeMob, dt: number) {
     return;
   }
 
-  if (mob.type === "boss" && (mob.golemState || mob.executionerState)) {
+  if (mob.type === "boss" && (mob.golemState || mob.executionerState || mob.impalerState)) {
     return;
   }
 
@@ -3124,6 +3288,19 @@ function moveMobs(dt: number) {
           handlePlayerHit,
         );
       }
+    } else if (mob.type === "boss" && mob.impalerState) {
+        const playerHitbox = getPlayerCollisionBox();
+        updateImpalerBoss(
+          mob,
+          mob.impalerState,
+          playerHitbox.x,
+          playerHitbox.y,
+          playerHitbox.w,
+          playerHitbox.h,
+          dt,
+          (target) => clampMobToRoom(target, 0),
+          handlePlayerHit,
+        );
     } else {
       moveMob(mob, dt);
     }
@@ -3143,6 +3320,15 @@ function moveMobs(dt: number) {
       mob.type === "boss" &&
       mob.executionerState &&
       isExecutionerDeathComplete(mob.executionerState) &&
+      isMobAlive(mob)
+    ) {
+      slayMob(mob);
+    }
+
+    if (
+      mob.type === "boss" &&
+      mob.impalerState &&
+      isImpalerDeathComplete(mob.impalerState) &&
       isMobAlive(mob)
     ) {
       slayMob(mob);
@@ -3615,6 +3801,7 @@ function update() {
   }
 
   updateSoulScytheProjectiles(dt);
+  updateFireRings(dt);
 
   if (
     mapOpen ||
@@ -4048,11 +4235,7 @@ function drawPlayer() {
     return;
   }
 
-  if (invincible) {
-    drawTintedSprite(ctx, playerSprite, player.x, player.y, player.size, "#ff6666", 0.55);
-  } else {
-    drawSprite(ctx, playerSprite, player.x, player.y, player.size, player.size);
-  }
+  drawSprite(ctx, playerSprite, player.x, player.y, player.size, player.size);
 
   if (performance.now() < dashActiveUntil) {
     ctx.strokeStyle = "rgba(120, 200, 255, 0.8)";
@@ -4933,16 +5116,51 @@ function drawWeaponSwing() {
   const elapsed = now - weaponSwing.lastAttackAt;
   const rawProgress = Math.min(1, elapsed / weaponSwing.durationMs);
   const progress = 1 - (1 - rawProgress) ** 2;
+  const thrust = weaponSwing.weaponId ? isThrustWeapon(weaponSwing.weaponId) : false;
+
+  ctx.save();
+  ctx.strokeStyle = weaponSwing.swingColor;
+  ctx.fillStyle = weaponSwing.swingColor;
+
+  if (thrust) {
+    const thrustAngle = facingToAngle(playerFacing);
+    const reach = weaponSwing.range * 0.92 * progress;
+    const tipX = centerX + Math.cos(thrustAngle) * reach;
+    const tipY = centerY + Math.sin(thrustAngle) * reach;
+    const trailWidth = 5;
+
+    ctx.globalAlpha = 0.24;
+    ctx.lineWidth = trailWidth + 10;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(centerX, centerY);
+    ctx.lineTo(tipX, tipY);
+    ctx.stroke();
+
+    ctx.globalAlpha = 0.72;
+    ctx.lineWidth = trailWidth;
+    ctx.beginPath();
+    ctx.moveTo(centerX, centerY);
+    ctx.lineTo(tipX, tipY);
+    ctx.stroke();
+
+    if (weaponSwing.weaponId) {
+      const sprite = getWeaponSprite(weaponSwing.weaponId);
+      const spriteSize = weaponSwing.swingSpriteSize;
+      ctx.globalAlpha = 1;
+      drawWeaponSwingSprite(ctx, weaponSwing.weaponId, sprite, tipX, tipY, thrustAngle, spriteSize);
+    }
+
+    ctx.restore();
+    return;
+  }
+
   const { start, end } = getSwingArcAngles(weaponSwing.swingArcScale);
   const arcStart = start;
   const arcEnd = start + (end - start) * progress;
   const radius = weaponSwing.range * 0.92;
   const swingAngle = arcStart + (arcEnd - arcStart) * progress;
   const trailWidth = weaponSwing.weaponId === "war-axe" ? 6 : weaponSwing.weaponId === "dagger" ? 2.5 : 4;
-
-  ctx.save();
-  ctx.strokeStyle = weaponSwing.swingColor;
-  ctx.fillStyle = weaponSwing.swingColor;
 
   ctx.beginPath();
   ctx.moveTo(centerX, centerY);
@@ -5456,6 +5674,7 @@ function draw() {
   drawWeaponSwing();
   drawPlayerGolemBeams();
   drawSoulScytheProjectiles();
+  drawFireRings();
 
   if (!getCurrentRoom().coinCollected) {
     drawSpriteCentered(ctx, SPRITES.coin, coin.x + coin.size / 2, coin.y + coin.size / 2, coin.size);
@@ -5477,6 +5696,12 @@ function draw() {
           performance.now() < mob.hitFlashUntil,
           performance.now(),
         );
+        drawMobHpBar(mob);
+        continue;
+      }
+
+      if (mob.type === "boss" && mob.impalerState && areImpalerSpritesLoaded()) {
+        drawImpalerBoss(ctx, mob, mob.impalerState, performance.now() < mob.hitFlashUntil);
         drawMobHpBar(mob);
         continue;
       }
@@ -5651,10 +5876,15 @@ canvas.addEventListener(
 
 let spritesReady = false;
 
-loadAssetSprites()
-  .then(() => loadWeaponSprites())
-  .then(() => loadGolemSprites())
-  .then(() => loadExecutionerSprites())
+async function loadAllSprites() {
+  await loadAssetSprites();
+  await loadWeaponSprites();
+  await loadGolemSprites();
+  await loadExecutionerSprites();
+  await loadImpalerSprites();
+}
+
+loadAllSprites()
   .then(() => {
     spritesReady = true;
     drawMenuArt();

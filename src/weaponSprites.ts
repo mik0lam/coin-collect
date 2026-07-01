@@ -9,6 +9,8 @@ import stormCleaverUrl from "../newsprites/weapons/storm-cleaver.png";
 import bloodReaperUrl from "../newsprites/weapons/blood-reaper.png";
 import phantomBladeUrl from "../newsprites/weapons/phantom-blade.png";
 import golemClubUrl from "../newsprites/weapons/golem-club.png";
+import executionerScytheUrl from "../newsprites/weapons/executioner-scythe.png";
+import gungnirUrl from "../newsprites/weapons/gungnir.png";
 
 const WEAPON_IMAGE_URLS: Record<WeaponSpriteId, string> = {
   "rusty-sword": rustySwordUrl,
@@ -20,7 +22,8 @@ const WEAPON_IMAGE_URLS: Record<WeaponSpriteId, string> = {
   "blood-reaper": bloodReaperUrl,
   "phantom-blade": phantomBladeUrl,
   "golem-club": golemClubUrl,
-  "executioner-scythe": bloodReaperUrl,
+  "executioner-scythe": executionerScytheUrl,
+  gungnir: gungnirUrl,
 };
 
 let loaded = false;

@@ -15,7 +15,8 @@ export type WeaponId =
   | "blood-reaper"
   | "phantom-blade"
   | "golem-club"
-  | "executioner-scythe";
+  | "executioner-scythe"
+  | "gungnir";
 export type InventoryItemType = "health-potion" | "strong-potion" | "weapon" | "special";
 export type SpecialItemId = "dash-boots" | "power-ring" | "stone-charm" | "vitality-charm";
 export type ArmorTier = "none" | "leather" | "chain" | "plate";
@@ -32,6 +33,7 @@ export interface WeaponDef {
   swingColor: string;
   swingArcScale: number;
   swingSpriteSize: number;
+  attackStyle?: "swing" | "thrust";
   stars?: number;
   rarity?: "normal" | "legendary";
   ability?: string;
@@ -46,6 +48,7 @@ export interface MobConfig {
   contactDamage: number;
   currentHp?: number;
   bossKind?: BossKind;
+  impalerState?: ImpalerBossState;
 }
 
 export type GolemBossPhase = "idle" | "chase" | "laser" | "throw" | "hurt" | "dying";
@@ -92,6 +95,22 @@ export interface ExecutionerBossState {
   preferTeleport: boolean;
 }
 
+export type ImpalerBossPhase = "idle" | "walk" | "attack" | "hurt" | "dying";
+
+export interface ImpalerBossState {
+  phase: ImpalerBossPhase;
+  animFrame: number;
+  animStartedAt: number;
+  facingRight: boolean;
+  nextAttackAt: number;
+  phaseStartedAt: number;
+  attackIndex: number;
+  attackHit: boolean;
+  deathHandled: boolean;
+  hurtUntil: number;
+  currentAttack: "attack1" | "attack2" | "attack3" | "attack4" | "attack5" | "attack6";
+}
+
 export interface RuntimeMob {
   configIndex: number;
   type: MobType;
@@ -105,6 +124,7 @@ export interface RuntimeMob {
   bossKind?: BossKind;
   golemState?: GolemBossState;
   executionerState?: ExecutionerBossState;
+  impalerState?: ImpalerBossState;
 }
 
 export type ChestLoot =

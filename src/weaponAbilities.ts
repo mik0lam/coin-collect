@@ -15,6 +15,8 @@ export function getLegendaryAbilityLabel(weaponId: WeaponId) {
       return "Golem Beam — each swing fires a laser at the first foe (+2 dmg)";
     case "executioner-scythe":
       return "Soul Scythe — each swing throws a spinning blade (+3 dmg)";
+    case "gungnir":
+      return "Ring of Fire — each thrust summons a ring of fire (+4 dmg)";
     default:
       return null;
   }
@@ -57,12 +59,20 @@ export function shouldThrowSoulScythe(weaponId: WeaponId) {
   return weaponId === "executioner-scythe";
 }
 
+export function shouldCastGungnirFireRing(weaponId: WeaponId) {
+  return weaponId === "gungnir";
+}
+
 export function getSoulScytheDamage(_weaponId: WeaponId, _baseDamage: number) {
   return 3;
 }
 
 export function getGolemBeamDamage(_weaponId: WeaponId, _baseDamage: number) {
   return 2;
+}
+
+export function getGungnirFireRingDamage(_weaponId: WeaponId, _baseDamage: number) {
+  return 4;
 }
 
 export function getWeaponAbilityDescription(weaponId: WeaponId) {

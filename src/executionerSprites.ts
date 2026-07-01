@@ -5,7 +5,7 @@ import deathUrl from "./assets/sprites/executioner/death.png";
 
 export const EXECUTIONER_FRAME = 100;
 export const EXECUTIONER_DRAW_SIZE = 220;
-export const EXECUTIONER_HITBOX_SIZE = 120;
+export const EXECUTIONER_HITBOX_SIZE = 92;
 
 const idleFrames: HTMLCanvasElement[] = [];
 const attackingRows: HTMLCanvasElement[][] = [];

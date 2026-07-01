@@ -29,6 +29,7 @@ import {
 } from "./roomLayouts";
 import { GOLEM_HITBOX_SIZE } from "./golemSprites";
 import { EXECUTIONER_HITBOX_SIZE } from "./executionerSprites";
+import { IMPALER_HITBOX_SIZE } from "./impalerSprites";
 import { getBossDisplayName, getBossKindForDepth } from "./bossKind";
 import { isEnchantFloorDepth } from "./enchantFloors";
 import type { ChestLoot, Direction, Floor, MobConfig, MobType, Room } from "./types";
@@ -60,6 +61,19 @@ function generateMob(type: MobType, depth: number, rng: () => number): MobConfig
   switch (type) {
     case "boss": {
       const bossKind = getBossKindForDepth(depth);
+
+      if (bossKind === "impaler") {
+        return {
+          type,
+          bossKind,
+          segments: [{ x: 0, y: 0 }],
+          size: IMPALER_HITBOX_SIZE,
+          speed: 1.1 + depth * 0.018,
+          maxHp: Math.floor(62 + depth * 8.5),
+          contactDamage: Math.floor(baseContact * 1.35),
+        };
+      }
+
       const isExecutioner = bossKind === "executioner";
 
       return {
@@ -143,10 +157,10 @@ function generateChestLoot(depth: number, rng: () => number): ChestLoot {
   }
 
   if (roll < 0.8) {
-    return { kind: "health-potion", healAmount: 30 + Math.floor(depth * 10 + rng() * 10) };
+    return { kind: "health-potion", healAmount: 22 + Math.floor(depth * 3 + rng() * 5) };
   }
 
-  return { kind: "strong-potion", healAmount: 55 + Math.floor(depth * 14 + rng() * 12) };
+  return { kind: "strong-potion", healAmount: 40 + Math.floor(depth * 4 + rng() * 6) };
 }
 
 function placeEnchantSeal(
@@ -395,7 +409,7 @@ function buildRoom(
         h: POTION_PICKUP_SIZE,
       });
       room.potionPickup = potionPos;
-      room.potionHeal = 30 + Math.floor(depth * 12 + rng() * 10);
+      room.potionHeal = 22 + Math.floor(depth * 3 + rng() * 5);
     } else if (loot === "chest") {
       const chestPos = findLayoutPosition(rng, CHEST_SIZE, occupied, layout, exits, obstacles);
       occupied.push({

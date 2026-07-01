@@ -131,6 +131,21 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     stars: 2,
     ability: "Golem Beam — each swing fires a laser at the first foe (+2 dmg)",
   },
+  "executioner-scythe": {
+    damage: 6,
+    knockback: 36,
+    range: 54,
+    width: 46,
+    cooldownMs: 420,
+    durationMs: 190,
+    maxDurability: 85,
+    name: "Executioner's Scythe",
+    swingColor: "rgba(180, 60, 255, 0.95)",
+    swingArcScale: 1.2,
+    swingSpriteSize: 52,
+    stars: 2,
+    ability: "Soul Scythe — each swing throws a spinning blade (+3 dmg)",
+  },
 };
 
 export function formatWeaponName(weaponId: WeaponId) {
@@ -165,6 +180,11 @@ export const LEGENDARY_WEAPON_IDS: WeaponId[] = [
   "phantom-blade",
 ];
 
+export const BOSS_WEAPON_ID: WeaponId = "golem-club";
+export const EXECUTIONER_BOSS_WEAPON_ID: WeaponId = "executioner-scythe";
+
+export const ALL_WEAPON_IDS = Object.keys(WEAPONS) as WeaponId[];
+
 export function isOneStarWeapon(weaponId: WeaponId) {
   const def = WEAPONS[weaponId];
   return def.rarity === "legendary" && (!def.stars || def.stars <= 1);
@@ -175,12 +195,10 @@ export function getOneStarWeaponIds(): WeaponId[] {
 }
 
 export function getNormalWeaponIds(): WeaponId[] {
-  return ALL_WEAPON_IDS.filter((id) => !isOneStarWeapon(id) && id !== BOSS_WEAPON_ID);
+  return ALL_WEAPON_IDS.filter(
+    (id) => !isOneStarWeapon(id) && id !== BOSS_WEAPON_ID && id !== EXECUTIONER_BOSS_WEAPON_ID,
+  );
 }
-
-export const BOSS_WEAPON_ID: WeaponId = "golem-club";
-
-export const ALL_WEAPON_IDS = Object.keys(WEAPONS) as WeaponId[];
 
 export const MOB_COLORS: Record<MobType, { normal: string; hit: string }> = {
   snake: { normal: "lime", hit: "#88ff88" },
@@ -197,7 +215,6 @@ export const SHOP_FLOOR_INTERVAL = 3;
 export const BOSS_FLOOR_INTERVAL = 10;
 
 export const WEAPON_PICKUP_SIZE = 48;
-export const SWORD_START_POSITION = { x: 200, y: 116 };
 export const FLOOR_MESSAGE_MS = 2500;
 export const DESCEND_BONUS = 15;
 export const STAIRS_COOLDOWN_MS = 900;
@@ -221,8 +238,23 @@ export const DASH_SPEED = 16;
 export const SPECIAL_ITEMS: Record<SpecialItemId, { name: string; description: string; shopCost: number }> = {
   "dash-boots": {
     name: "Dash Boots",
-    description: "Press Shift to dash through danger",
+    description: "Equip to dash with Shift",
     shopCost: 45,
+  },
+  "power-ring": {
+    name: "Power Ring",
+    description: "Equip for +1 weapon damage",
+    shopCost: 55,
+  },
+  "stone-charm": {
+    name: "Stone Charm",
+    description: "Equip for +20% weapon durability",
+    shopCost: 50,
+  },
+  "vitality-charm": {
+    name: "Vitality Charm",
+    description: "Equip for +8 max HP",
+    shopCost: 48,
   },
 };
 

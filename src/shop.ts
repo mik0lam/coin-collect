@@ -58,13 +58,8 @@ export function tryBuyWeaponRepair(
 export function tryBuySpecialItem(
   score: { value: number },
   specialId: SpecialItemId,
-  alreadyOwned: boolean,
 ): string | null {
   const item = SPECIAL_ITEMS[specialId];
-
-  if (alreadyOwned) {
-    return "You already have dash.";
-  }
 
   if (score.value < item.shopCost) {
     return `Need ${item.shopCost} coins.`;

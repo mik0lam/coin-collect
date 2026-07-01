@@ -20,6 +20,7 @@ const WEAPON_IMAGE_URLS: Record<WeaponSpriteId, string> = {
   "blood-reaper": bloodReaperUrl,
   "phantom-blade": phantomBladeUrl,
   "golem-club": golemClubUrl,
+  "executioner-scythe": bloodReaperUrl,
 };
 
 let loaded = false;

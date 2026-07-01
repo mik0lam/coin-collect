@@ -1,4 +1,6 @@
+import type { ItemEnchant } from "./enchants";
 import type { LayoutObstacle } from "./roomLayouts";
+import type { BossKind } from "./bossKind";
 
 export type GameState = "menu" | "playing" | "gameover";
 export type Direction = "north" | "south" | "east" | "west";
@@ -12,9 +14,10 @@ export type WeaponId =
   | "storm-cleaver"
   | "blood-reaper"
   | "phantom-blade"
-  | "golem-club";
+  | "golem-club"
+  | "executioner-scythe";
 export type InventoryItemType = "health-potion" | "strong-potion" | "weapon" | "special";
-export type SpecialItemId = "dash-boots";
+export type SpecialItemId = "dash-boots" | "power-ring" | "stone-charm" | "vitality-charm";
 export type ArmorTier = "none" | "leather" | "chain" | "plate";
 
 export interface WeaponDef {
@@ -42,6 +45,7 @@ export interface MobConfig {
   maxHp: number;
   contactDamage: number;
   currentHp?: number;
+  bossKind?: BossKind;
 }
 
 export type GolemBossPhase = "idle" | "chase" | "laser" | "throw" | "hurt" | "dying";
@@ -59,6 +63,35 @@ export interface GolemBossState {
   aimAngle: number;
 }
 
+export type ExecutionerBossPhase =
+  | "float"
+  | "swing"
+  | "vanish"
+  | "hidden"
+  | "appear"
+  | "hurt"
+  | "dying";
+
+export interface ExecutionerBossState {
+  phase: ExecutionerBossPhase;
+  anim: "idle" | "attacking" | "skill1" | "death";
+  animFrame: number;
+  animStartedAt: number;
+  facingRight: boolean;
+  nextAttackAt: number;
+  phaseStartedAt: number;
+  floatAngle: number;
+  swingHit: boolean;
+  appearHit: boolean;
+  attackTriggered: boolean;
+  deathHandled: boolean;
+  hurtUntil: number;
+  teleportX: number;
+  teleportY: number;
+  hiddenUntil: number;
+  preferTeleport: boolean;
+}
+
 export interface RuntimeMob {
   configIndex: number;
   type: MobType;
@@ -69,7 +102,9 @@ export interface RuntimeMob {
   maxHp: number;
   contactDamage: number;
   hitFlashUntil: number;
+  bossKind?: BossKind;
   golemState?: GolemBossState;
+  executionerState?: ExecutionerBossState;
 }
 
 export type ChestLoot =
@@ -92,12 +127,19 @@ export interface InventoryItem {
   weaponId?: WeaponId;
   weaponDurability?: number;
   specialId?: SpecialItemId;
+  enchant?: ItemEnchant;
 }
 
 export interface ScrapPickup {
   x: number;
   y: number;
   amount: number;
+}
+
+export interface DroppedItemPickup {
+  x: number;
+  y: number;
+  item: InventoryItem;
 }
 
 export interface ShopStation {
@@ -128,6 +170,7 @@ export interface Room {
   slotMachine?: { x: number; y: number };
   shop?: ShopStation;
   scrapPickups?: ScrapPickup[];
+  droppedItems?: DroppedItemPickup[];
   bossHeartPickup?: { x: number; y: number };
   bossWeaponPickup?: { x: number; y: number; weaponId: WeaponId };
   bossDefeated?: boolean;
@@ -137,6 +180,7 @@ export interface Room {
   specialPickup?: { x: number; y: number; specialId: SpecialItemId };
   specialPickupCollected?: boolean;
   layoutId?: string;
+  enchantSealBroken?: boolean;
 }
 
 export interface Floor {

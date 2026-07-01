@@ -864,7 +864,8 @@ export type WeaponSpriteId =
   | "storm-cleaver"
   | "blood-reaper"
   | "phantom-blade"
-  | "golem-club";
+  | "golem-club"
+  | "executioner-scythe";
 
 const WEAPON_SPRITE_MAP: Record<WeaponSpriteId, HTMLCanvasElement> = {
   "rusty-sword": rustySword,
@@ -876,6 +877,7 @@ const WEAPON_SPRITE_MAP: Record<WeaponSpriteId, HTMLCanvasElement> = {
   "blood-reaper": bloodReaperSprite,
   "phantom-blade": phantomBladeSprite,
   "golem-club": golemClubSprite,
+  "executioner-scythe": bloodReaperSprite,
 };
 
 export function applyWeaponSpriteOverrides(
@@ -905,6 +907,7 @@ export const WEAPON_SWING_PIVOTS: Record<WeaponSpriteId, WeaponSwingPivot> = {
   "blood-reaper": { handleX: 0.23, handleY: 0.82, bladeAngleRad: Math.atan2(-0.59, 0.52) },
   "phantom-blade": { handleX: 0.23, handleY: 0.8, bladeAngleRad: Math.atan2(-0.59, 0.51) },
   "golem-club": { handleX: 0.15, handleY: 0.81, bladeAngleRad: Math.atan2(-0.6, 0.59) },
+  "executioner-scythe": { handleX: 0.23, handleY: 0.82, bladeAngleRad: Math.atan2(-0.59, 0.52) },
 };
 
 export function drawWeaponSwingSprite(

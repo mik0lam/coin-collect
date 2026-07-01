@@ -1,11 +1,20 @@
-body {
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
   margin: 0;
+  overflow: hidden;
+}
+
+body {
   background: #111;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  height: 100vh;
   font-family: "Segoe UI", Arial, sans-serif;
+}
+
+#app {
+  width: 100vw;
+  height: 100vh;
 }
 
 .hidden {
@@ -13,27 +22,35 @@ body {
 }
 
 canvas {
-  border: 2px solid #3a3028;
-  border-top: none;
   display: block;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
 }
 
 .game-wrap {
-  width: fit-content;
-  max-width: 100vw;
+  width: 100vw;
+  height: 100vh;
   box-sizing: border-box;
-  border: 2px solid #5a4030;
   background: #120e0c;
-  overflow: visible;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.game-canvas-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+  background: #0a0a0a;
 }
 
 #game {
-  width: 800px;
-  height: 416px;
-  max-width: 100%;
-  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  border: none;
+  object-fit: contain;
 }
 
 .game-hud {
@@ -42,11 +59,12 @@ canvas {
   gap: 12px;
   align-items: center;
   min-height: 56px;
-  padding: 8px 12px;
+  padding: 8px 16px;
   background: #1a1410;
   border-bottom: 2px solid #3a3028;
   color: #ddd;
   font-size: 13px;
+  flex-shrink: 0;
 }
 
 .hud-group {
@@ -200,19 +218,20 @@ canvas {
 
 .game-hint {
   margin: 0;
-  padding: 6px 12px 8px;
+  padding: 6px 16px 8px;
   font-size: 11px;
   color: #666;
   text-align: center;
   background: #0a0a0a;
   border-top: 1px solid #222;
+  flex-shrink: 0;
 }
 
 .menu {
   position: relative;
-  width: 800px;
-  height: 500px;
-  border: 2px solid #4a4038;
+  width: 100vw;
+  height: 100vh;
+  border: none;
   background: #08080e;
   display: flex;
   align-items: center;
@@ -430,10 +449,20 @@ canvas {
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: 100%;
+  width: calc(100% - 2rem);
   max-width: 400px;
-  padding: 0 2rem;
+  padding: 1.75rem 2rem 1.5rem;
   text-align: center;
+  background: #12101a;
+  border: 2px solid #4a4458;
+  border-radius: 8px;
+  box-shadow:
+    0 16px 48px rgba(0, 0, 0, 0.85),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+#menu-leaderboard {
+  max-width: 560px;
 }
 
 .menu-help-title {
@@ -526,19 +555,31 @@ canvas {
   max-height: 320px;
   overflow-y: auto;
   margin: 0 0 1rem;
+  padding: 0.5rem;
   text-align: left;
+  background: #0a0810;
+  border: 1px solid #2a2438;
+  border-radius: 6px;
 }
 
 .leaderboard-row {
   display: grid;
   grid-template-columns: 2rem 1fr 1fr;
-  gap: 0.25rem 0.75rem;
+  gap: 0.2rem 0.75rem;
   padding: 0.55rem 0.65rem;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #1a1624;
+  border: 1px solid #3a3448;
   border-radius: 6px;
   font-size: 0.85rem;
   color: #d8d0c8;
+}
+
+.leaderboard-depth,
+.leaderboard-kills,
+.leaderboard-weapon,
+.leaderboard-time {
+  color: #a8a0b0;
+  font-size: 0.78rem;
 }
 
 .leaderboard-rank {
@@ -553,5 +594,5 @@ canvas {
 
 .leaderboard-empty {
   color: #a89890;
-  margin: 0 0 1rem;
+  margin: 0.5rem 0;
 }

@@ -248,7 +248,7 @@ export function updateGolemBoss(
   playerSize: number,
   dt: number,
   clamp: (mob: RuntimeMob) => void,
-  onPlayerHit: (damage: number) => void,
+  onPlayerHit: (damage: number, sourceX: number, sourceY: number) => void,
 ) {
   if (!mob.segments.length || state.phase === "dying") {
     return;
@@ -273,7 +273,7 @@ export function updateGolemBoss(
     if (
       playerBoxOverlaps(playerX, playerY, playerSize, playerSize, rock.x, rock.y, rock.size)
     ) {
-      onPlayerHit(Math.floor(mob.contactDamage * 0.75));
+      onPlayerHit(Math.floor(mob.contactDamage * 0.75), rock.x + rock.size / 2, rock.y + rock.size / 2);
       rocks.splice(i, 1);
       continue;
     }
@@ -290,7 +290,7 @@ export function updateGolemBoss(
 
   for (const laser of lasers) {
     if (playerHitsLaser(laser, playerX, playerY, playerSize)) {
-      onPlayerHit(laser.damage);
+      onPlayerHit(laser.damage, laser.originX, laser.originY);
     }
   }
 

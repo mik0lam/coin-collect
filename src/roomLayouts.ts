@@ -223,6 +223,7 @@ export interface LayoutObstacle {
   kind: LayoutObstacleKind;
   hp: number;
   maxHp: number;
+  enchantSeal?: boolean;
 }
 
 export function obstacleMaxHp(kind: LayoutObstacleKind) {

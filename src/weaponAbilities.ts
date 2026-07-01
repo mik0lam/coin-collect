@@ -13,6 +13,8 @@ export function getLegendaryAbilityLabel(weaponId: WeaponId) {
       return "Phase Strike — attacks never lose durability";
     case "golem-club":
       return "Golem Beam — each swing fires a laser at the first foe (+2 dmg)";
+    case "executioner-scythe":
+      return "Soul Scythe — each swing throws a spinning blade (+3 dmg)";
     default:
       return null;
   }
@@ -49,6 +51,14 @@ export function shouldChainStrike(weaponId: WeaponId, rng = Math.random()) {
 
 export function shouldFireGolemBeam(weaponId: WeaponId) {
   return weaponId === "golem-club";
+}
+
+export function shouldThrowSoulScythe(weaponId: WeaponId) {
+  return weaponId === "executioner-scythe";
+}
+
+export function getSoulScytheDamage(_weaponId: WeaponId, _baseDamage: number) {
+  return 3;
 }
 
 export function getGolemBeamDamage(_weaponId: WeaponId, _baseDamage: number) {

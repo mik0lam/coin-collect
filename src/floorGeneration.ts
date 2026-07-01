@@ -14,21 +14,25 @@ import {
   SHOP_STATION_SIZE,
   SLOT_MACHINE_SIZE,
   SPECIAL_PICKUP_SIZE,
-  SWORD_START_POSITION,
   VOID_SHARD_FLOOR_INTERVAL,
   VOID_SHARD_SIZE,
 } from "./constants";
 import { getOneStarWeaponPool } from "./legendaryPool";
+import { getRandomAccessoryId } from "./accessories";
 import { createRng } from "./rng";
 import { findLayoutPosition, findOpenPosition, isSnakeSpawnClear } from "./placement";
 import {
   clearDoorCorridors,
   getDoorClearZones,
   layoutToObstacles,
+  LAYOUT_TILE_SIZE,
   pickRoomLayout,
   ROOM_LAYOUTS,
 } from "./roomLayouts";
 import { GOLEM_HITBOX_SIZE } from "./golemSprites";
+import { EXECUTIONER_HITBOX_SIZE } from "./executionerSprites";
+import { getBossDisplayName, getBossKindForDepth } from "./bossKind";
+import { isEnchantFloorDepth } from "./enchantFloors";
 import type { ChestLoot, Direction, Floor, MobConfig, MobType, Room } from "./types";
 
 function spriteDrawSize(sprite: HTMLCanvasElement) {
@@ -56,15 +60,20 @@ function generateMob(type: MobType, depth: number, rng: () => number): MobConfig
   const baseContact = contactDamageForDepth(depth);
 
   switch (type) {
-    case "boss":
+    case "boss": {
+      const bossKind = getBossKindForDepth(depth);
+      const isExecutioner = bossKind === "executioner";
+
       return {
         type,
+        bossKind,
         segments: [{ x: 0, y: 0 }],
-        size: GOLEM_HITBOX_SIZE,
-        speed: 0.95 + depth * 0.025,
-        maxHp: Math.floor(55 + depth * 8),
-        contactDamage: Math.floor(baseContact * 1.5),
+        size: isExecutioner ? EXECUTIONER_HITBOX_SIZE : GOLEM_HITBOX_SIZE,
+        speed: isExecutioner ? 1.15 + depth * 0.02 : 0.95 + depth * 0.025,
+        maxHp: Math.floor(isExecutioner ? 48 + depth * 7 : 55 + depth * 8),
+        contactDamage: Math.floor(baseContact * (isExecutioner ? 1.35 : 1.5)),
       };
+    }
     case "snake": {
       const segmentCount = Math.min(9, 2 + Math.floor(depth / 2) + Math.floor(rng() * 2));
       const speed = 1.0 + depth * 0.08 + rng() * 0.25;
@@ -126,12 +135,12 @@ function generateEnemies(depth: number, rng: () => number, isStartRoom: boolean)
 function generateChestLoot(depth: number, rng: () => number): ChestLoot {
   const roll = rng();
 
-  if (roll < 0.5) {
+  if (roll < 0.42) {
     const normalPool = getNormalWeaponIds();
     return { kind: "weapon", weaponId: normalPool[Math.floor(rng() * normalPool.length)] };
   }
 
-  if (roll < 0.58 && depth >= 4) {
+  if (roll < 0.5 && depth >= 4) {
     const oneStarPool = getOneStarWeaponPool();
     return {
       kind: "weapon",
@@ -139,15 +148,39 @@ function generateChestLoot(depth: number, rng: () => number): ChestLoot {
     };
   }
 
-  if (roll < 0.66 && depth >= 2) {
-    return { kind: "special", specialId: "dash-boots" };
+  if (roll < 0.68 && depth >= 2) {
+    return { kind: "special", specialId: getRandomAccessoryId(rng) };
   }
 
-  if (roll < 0.78) {
+  if (roll < 0.8) {
     return { kind: "health-potion", healAmount: 30 + Math.floor(depth * 10 + rng() * 10) };
   }
 
   return { kind: "strong-potion", healAmount: 55 + Math.floor(depth * 14 + rng() * 12) };
+}
+
+function placeEnchantSeal(
+  room: Room,
+  rng: () => number,
+  buildOccupied: (room: Room) => { x: number; y: number; w: number; h: number }[],
+) {
+  if (room.enchantSealBroken) {
+    return;
+  }
+
+  const occupied = buildOccupied(room);
+  const pos = findOpenPosition(rng, LAYOUT_TILE_SIZE, occupied, room.exits, room.obstacles);
+
+  room.obstacles.push({
+    x: pos.x,
+    y: pos.y,
+    w: LAYOUT_TILE_SIZE,
+    h: LAYOUT_TILE_SIZE,
+    kind: "rock",
+    hp: 1,
+    maxHp: 1,
+    enchantSeal: true,
+  });
 }
 
 function rollRoomLoot(rng: () => number) {
@@ -440,7 +473,7 @@ function generateBossFloor(depth: number, seed: number, coinSize: number): Floor
 
   prepBuilt.room.name = `Depth ${depth} · Boss Antechamber`;
   prepBuilt.room.isPrepRoom = true;
-  bossBuilt.room.name = `Depth ${depth} · Mecha Stone Golem`;
+  bossBuilt.room.name = `Depth ${depth} · ${getBossDisplayName(getBossKindForDepth(depth))}`;
   bossBuilt.room.isBossRoom = true;
 
   placeShop(prepBuilt.room, depth, rng, (room) => {
@@ -465,7 +498,7 @@ function generateBossFloor(depth: number, seed: number, coinSize: number): Floor
   };
 }
 
-export function generateFloor(depth: number, seed: number, coinSize: number): Floor {
+export function generateFloor(depth: number, seed: number, coinSize: number, runSeed: number): Floor {
   if (depth % BOSS_FLOOR_INTERVAL === 0) {
     return generateBossFloor(depth, seed, coinSize);
   }
@@ -531,7 +564,6 @@ export function generateFloor(depth: number, seed: number, coinSize: number): Fl
   }
 
   if (depth === 1) {
-    rooms[startId].weaponPickup = { ...SWORD_START_POSITION, weaponId: "rusty-sword" };
     rooms[startId].potionPickup = { x: 280, y: 200 };
     rooms[startId].potionHeal = 45;
     rooms[startId].potionCollected = false;
@@ -565,6 +597,27 @@ export function generateFloor(depth: number, seed: number, coinSize: number): Fl
 
   placeVoidShardAndSlotMachine(rooms, startId, depth, rng, buildOccupied);
   placeShop(rooms[startId], depth, rng, buildOccupied);
+
+  if (isEnchantFloorDepth(runSeed, depth)) {
+    const roomIds = Object.keys(rooms);
+    const targetRoomId = roomIds[Math.floor(rng() * roomIds.length)]!;
+    const targetRoom = rooms[targetRoomId]!;
+
+    placeEnchantSeal(targetRoom, rng, (room) => {
+      const occ: { x: number; y: number; w: number; h: number }[] = [
+        ...getDoorClearZones(room.exits),
+        ...room.obstacles,
+      ];
+
+      if (!room.coinCollected) {
+        occ.push({ x: room.coin.x, y: room.coin.y, w: coinSize, h: coinSize });
+      }
+
+      return occ;
+    });
+
+    targetRoom.name = `Depth ${depth} · Hidden Sanctum`;
+  }
 
   return {
     depth,

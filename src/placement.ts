@@ -5,6 +5,13 @@ import type { Box, Direction } from "./types";
 import type { LayoutObstacle, RoomLayoutTemplate } from "./roomLayouts";
 import { LAYOUT_TILE_SIZE } from "./roomLayouts";
 
+export function clampToPlayBounds(x: number, y: number, size: number) {
+  return {
+    x: Math.max(8, Math.min(PLAY_WIDTH - size - 8, x)),
+    y: Math.max(8, Math.min(PLAY_HEIGHT - size - 8, y)),
+  };
+}
+
 export function findOpenPosition(
   rng: () => number,
   size: number,
@@ -17,7 +24,7 @@ export function findOpenPosition(
     const candidate = { x: pos.x, y: pos.y, w: size, h: size };
 
     if (isSpawnBoxClear(candidate, exits, obstacles, occupied, 12)) {
-      return pos;
+      return clampToPlayBounds(pos.x, pos.y, size);
     }
   }
 
@@ -27,10 +34,10 @@ export function findOpenPosition(
   };
 
   if (isSpawnBoxClear({ ...fallback, w: size, h: size }, exits, obstacles, occupied, 8)) {
-    return fallback;
+    return clampToPlayBounds(fallback.x, fallback.y, size);
   }
 
-  return { x: LAYOUT_TILE_SIZE * 2, y: LAYOUT_TILE_SIZE * 2 };
+  return clampToPlayBounds(LAYOUT_TILE_SIZE * 2, LAYOUT_TILE_SIZE * 2, size);
 }
 
 export function findLayoutPosition(
@@ -62,10 +69,12 @@ export function findLayoutPosition(
   }
 
   if (candidates.length === 0) {
-    return findOpenPosition(rng, size, occupied, exits, obstacles);
+    const fallback = findOpenPosition(rng, size, occupied, exits, obstacles);
+    return clampToPlayBounds(fallback.x, fallback.y, size);
   }
 
-  return candidates[Math.floor(rng() * candidates.length)];
+  const picked = candidates[Math.floor(rng() * candidates.length)]!;
+  return clampToPlayBounds(picked.x, picked.y, size);
 }
 
 export function isSnakeSpawnClear(

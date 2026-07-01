@@ -272,15 +272,6 @@ export const SPECIAL_ITEMS: Record<SpecialItemId, { name: string; description: s
   },
 };
 
-export const ARMOR_VISUAL: Record<
-  Exclude<ArmorTier, "none">,
-  { tint: string; alpha: number; accent: string }
-> = {
-  leather: { tint: "#8B5A2B", alpha: 0.28, accent: "#6B4423" },
-  chain: { tint: "#8899AA", alpha: 0.32, accent: "#667788" },
-  plate: { tint: "#C0C8D8", alpha: 0.38, accent: "#909AAA" },
-};
-
 export const ARMOR_TIERS: Record<
   Exclude<ArmorTier, "none">,
   { scrapCost: number; maxHpBonus: number; label: string }

@@ -45,7 +45,6 @@ import {
 import { drawTileDebugOverlay, inspectTileAt, type TileInspection } from "./tileDebug";
 import {
   ARMOR_TIERS,
-  ARMOR_VISUAL,
   BASE_MAX_HP,
   BOSS_HEART_HP_BONUS,
   BOSS_HEART_SIZE,
@@ -4055,47 +4054,10 @@ function drawPlayer() {
     drawSprite(ctx, playerSprite, player.x, player.y, player.size, player.size);
   }
 
-  if (armorTier !== "none") {
-    const visual = ARMOR_VISUAL[armorTier];
-    drawTintedSprite(
-      ctx,
-      playerSprite,
-      player.x,
-      player.y,
-      player.size,
-      visual.tint,
-      visual.alpha,
-    );
-
-    const cx = player.x + player.size / 2;
-    const cy = player.y + player.size / 2;
-    ctx.fillStyle = visual.accent;
-    ctx.globalAlpha = 0.75;
-
-    if (playerFacing === "north" || playerFacing === "south") {
-      ctx.fillRect(cx - 14, cy - 6, 28, 10);
-      ctx.fillRect(cx - 18, cy - 14, 8, 8);
-      ctx.fillRect(cx + 10, cy - 14, 8, 8);
-    } else {
-      ctx.fillRect(cx - 10, cy - 4, 20, 12);
-      ctx.fillRect(cx - 20, cy - 10, 8, 8);
-      ctx.fillRect(cx + 12, cy - 10, 8, 8);
-    }
-
-    ctx.globalAlpha = 1;
-  }
-
   if (performance.now() < dashActiveUntil) {
     ctx.strokeStyle = "rgba(120, 200, 255, 0.8)";
     ctx.lineWidth = 2;
     ctx.strokeRect(player.x + 2, player.y + 2, player.size - 4, player.size - 4);
-  }
-
-  if (debugMode) {
-    const hitbox = getPlayerCollisionBox();
-    ctx.strokeStyle = "rgba(80, 255, 120, 0.95)";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(hitbox.x + 0.5, hitbox.y + 0.5, hitbox.w - 1, hitbox.h - 1);
   }
 }
 
@@ -4168,11 +4130,6 @@ function drawWeaponPickup() {
   const pulse = Math.sin(performance.now() / 200) * 3;
   const size = WEAPON_PICKUP_SIZE;
 
-  ctx.fillStyle = "rgba(255, 136, 68, 0.18)";
-  ctx.beginPath();
-  ctx.arc(pickup.x + size / 2, pickup.y + size / 2 + pulse, size * 0.55, 0, Math.PI * 2);
-  ctx.fill();
-
   drawSprite(
     ctx,
     getWeaponSprite(pickup.weaponId),
@@ -4195,11 +4152,6 @@ function drawPotionPickup() {
   const pulse = Math.sin(performance.now() / 220) * 3;
   const size = POTION_PICKUP_SIZE;
 
-  ctx.fillStyle = "rgba(200, 80, 255, 0.18)";
-  ctx.beginPath();
-  ctx.arc(screenX + size / 2, screenY + size / 2 + pulse, size * 0.55, 0, Math.PI * 2);
-  ctx.fill();
-
   drawSprite(ctx, SPRITES.potionHealth, screenX, screenY + pulse, size, size);
 }
 
@@ -4215,19 +4167,6 @@ function drawChest() {
   const pulse = room.chest.opened ? 0 : Math.sin(performance.now() / 260) * 2;
   const sprite = room.chest.opened ? SPRITES.chestOpen : SPRITES.chestClosed;
 
-  if (!room.chest.opened) {
-    ctx.fillStyle = "rgba(255, 215, 0, 0.15)";
-    ctx.beginPath();
-    ctx.arc(
-      screenX + CHEST_SIZE / 2,
-      screenY + CHEST_SIZE / 2 + pulse,
-      CHEST_SIZE * 0.65,
-      0,
-      Math.PI * 2,
-    );
-    ctx.fill();
-  }
-
   drawSprite(ctx, sprite, screenX, screenY + pulse, CHEST_SIZE, CHEST_SIZE);
 }
 
@@ -4240,19 +4179,7 @@ function drawVoidShardPickup() {
 
   const screenX = room.voidShardPickup.x;
   const screenY = room.voidShardPickup.y;
-  const pulse = Math.sin(performance.now() / 180) * 4;
   const bob = Math.sin(performance.now() / 320) * 3;
-
-  ctx.fillStyle = "rgba(144, 64, 232, 0.22)";
-  ctx.beginPath();
-  ctx.arc(
-    screenX + VOID_SHARD_SIZE / 2,
-    screenY + VOID_SHARD_SIZE / 2 + bob,
-    VOID_SHARD_SIZE * 0.7 + pulse * 0.15,
-    0,
-    Math.PI * 2,
-  );
-  ctx.fill();
 
   drawSprite(
     ctx,
@@ -4273,17 +4200,6 @@ function drawScrapPickups() {
 
   for (const pickup of room.scrapPickups) {
     const pulse = Math.sin(performance.now() / 240 + pickup.x) * 2;
-
-    ctx.fillStyle = "rgba(160, 160, 170, 0.25)";
-    ctx.beginPath();
-    ctx.arc(
-      pickup.x + SCRAP_PICKUP_SIZE / 2,
-      pickup.y + SCRAP_PICKUP_SIZE / 2 + pulse,
-      SCRAP_PICKUP_SIZE * 0.55,
-      0,
-      Math.PI * 2,
-    );
-    ctx.fill();
 
     ctx.fillStyle = "#b8bcc8";
     ctx.fillRect(pickup.x + 6, pickup.y + 8 + pulse, SCRAP_PICKUP_SIZE - 12, SCRAP_PICKUP_SIZE - 14);
@@ -4308,17 +4224,6 @@ function drawBossHeartPickup() {
   const heart = room.bossHeartPickup;
   const pulse = Math.sin(performance.now() / 200) * 3;
 
-  ctx.fillStyle = "rgba(255, 64, 96, 0.28)";
-  ctx.beginPath();
-  ctx.arc(
-    heart.x + BOSS_HEART_SIZE / 2,
-    heart.y + BOSS_HEART_SIZE / 2 + pulse,
-    BOSS_HEART_SIZE * 0.75,
-    0,
-    Math.PI * 2,
-  );
-  ctx.fill();
-
   ctx.fillStyle = "#ff4466";
   ctx.beginPath();
   ctx.arc(heart.x + BOSS_HEART_SIZE / 2, heart.y + BOSS_HEART_SIZE / 2 + pulse, 10, 0, Math.PI * 2);
@@ -4342,25 +4247,13 @@ function drawShopStation() {
   const screenY = room.shop.y;
   const pulse = Math.sin(performance.now() / 300) * 2;
 
-  ctx.fillStyle = "rgba(80, 200, 120, 0.18)";
-  ctx.beginPath();
-  ctx.arc(
-    screenX + SHOP_STATION_SIZE / 2,
-    screenY + SHOP_STATION_SIZE / 2 + pulse,
-    SHOP_STATION_SIZE * 0.62,
-    0,
-    Math.PI * 2,
-  );
-  ctx.fill();
-
-  drawTintedSprite(
+  drawSprite(
     ctx,
     SPRITES.chestClosed,
     screenX + 6,
     screenY + 8 + pulse,
     SHOP_STATION_SIZE - 12,
-    "#5cd68a",
-    0.35,
+    SHOP_STATION_SIZE - 12,
   );
 
   if (isNearShopStation(room, getPlayerCollisionBox())) {
@@ -4383,25 +4276,13 @@ function drawSlotMachine() {
   const screenY = room.slotMachine.y;
   const pulse = Math.sin(performance.now() / 340) * 2;
 
-  ctx.fillStyle = "rgba(160, 72, 255, 0.22)";
-  ctx.beginPath();
-  ctx.arc(
-    screenX + SLOT_MACHINE_SIZE / 2,
-    screenY + SLOT_MACHINE_SIZE / 2 + pulse,
-    SLOT_MACHINE_SIZE * 0.68,
-    0,
-    Math.PI * 2,
-  );
-  ctx.fill();
-
-  drawTintedSprite(
+  drawSprite(
     ctx,
     SPRITES.slotMachine,
     screenX,
     screenY + pulse,
     SLOT_MACHINE_SIZE,
-    "#c070ff",
-    0.4,
+    SLOT_MACHINE_SIZE,
   );
 
   if (isNearSlotMachine() && slotSpin.activeUntil <= performance.now()) {
@@ -5029,18 +4910,6 @@ function drawObstacles(room: Room) {
 
     drawSprite(ctx, sprite, obstacle.x, obstacle.y, obstacle.w, obstacle.h);
 
-    if (obstacle.enchantSeal) {
-      const pulse = 0.45 + Math.sin(performance.now() / 280) * 0.25;
-      ctx.save();
-      ctx.globalAlpha = pulse;
-      ctx.strokeStyle = "#c060ff";
-      ctx.lineWidth = 3;
-      ctx.strokeRect(obstacle.x + 2, obstacle.y + 2, obstacle.w - 4, obstacle.h - 4);
-      ctx.fillStyle = "rgba(160, 80, 255, 0.22)";
-      ctx.fillRect(obstacle.x + 6, obstacle.y + 6, obstacle.w - 12, obstacle.h - 12);
-      ctx.restore();
-    }
-
     if (damaged) {
       ctx.restore();
       ctx.save();
@@ -5456,11 +5325,6 @@ function drawBossWeaponPickup() {
   const pulse = Math.sin(performance.now() / 220) * 3;
   const size = WEAPON_PICKUP_SIZE;
 
-  ctx.fillStyle = "rgba(180, 120, 255, 0.28)";
-  ctx.beginPath();
-  ctx.arc(pickup.x + size / 2, pickup.y + size / 2 + pulse, size * 0.62, 0, Math.PI * 2);
-  ctx.fill();
-
   drawSprite(
     ctx,
     getWeaponSprite(pickup.weaponId),
@@ -5488,11 +5352,6 @@ function drawSpecialPickup() {
   const pulse = Math.sin(performance.now() / 180) * 3;
   const size = SPECIAL_PICKUP_SIZE;
 
-  ctx.fillStyle = "rgba(80, 180, 255, 0.25)";
-  ctx.beginPath();
-  ctx.arc(pickup.x + size / 2, pickup.y + size / 2 + pulse, size * 0.55, 0, Math.PI * 2);
-  ctx.fill();
-
   drawSprite(ctx, SPRITES.dashBoots, pickup.x + 4, pickup.y + 4 + pulse, size - 8, size - 8);
 
   ctx.fillStyle = "#a8e8ff";
@@ -5517,11 +5376,6 @@ function drawDroppedItems() {
     const pulse = Math.sin(performance.now() / 200 + drop.x) * 3;
     const size = getDroppedItemSize(drop.item);
     const item = drop.item;
-
-    ctx.fillStyle = "rgba(255, 200, 80, 0.2)";
-    ctx.beginPath();
-    ctx.arc(drop.x + size / 2, drop.y + size / 2 + pulse, size * 0.55, 0, Math.PI * 2);
-    ctx.fill();
 
     if (item.type === "weapon" && item.weaponId) {
       drawSprite(

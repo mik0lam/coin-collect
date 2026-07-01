@@ -235,14 +235,6 @@ export function drawTileDebugOverlay(
     return;
   }
 
-  if (inspection) {
-    ctx.fillStyle = "rgba(0, 180, 255, 0.12)";
-    ctx.fillRect(inspection.x, inspection.y, LAYOUT_TILE_SIZE, LAYOUT_TILE_SIZE);
-    ctx.strokeStyle = "#00e8ff";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(inspection.x, inspection.y, LAYOUT_TILE_SIZE, LAYOUT_TILE_SIZE);
-  }
-
   const panelW = Math.min(playWidth - 16, 420);
   ctx.fillStyle = "rgba(8, 12, 20, 0.92)";
   ctx.fillRect(8, 8, panelW, 88);
